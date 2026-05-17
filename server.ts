@@ -812,9 +812,7 @@ function assignProfileToCandidate(profileIdToUse: string, displayName: string, h
   db.insert(schema.contactCandidates).values({
     id: candidateId,
     canonicalName: displayName || normalizedHandle || 'Unknown',
-    confidenceScore: reviewEvidence.length > 0
-      ? Math.max(...reviewEvidence.map((evidence) => evidence.score))
-      : 50,
+    confidenceScore: 50,
     status: 'pending',
     createdAt: now,
     updatedAt: now

@@ -35,7 +35,6 @@
       return { error: 'Hub URL must be a valid absolute URL.', ok: false, url: '' };
     }
 
-    parsedUrl.pathname = parsedUrl.pathname.replace(/\/+$/, '');
     parsedUrl.search = '';
     parsedUrl.hash = '';
 
