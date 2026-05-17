@@ -211,8 +211,9 @@ const normalizeMastodonInstanceUrl = (instance: string) => {
 const MANUAL_CAPTURE_SOURCES = new Set(['bluesky', 'linkedin', 'x', 'xing']);
 const OAUTH_STATE_TTL_MS = 10 * 60 * 1000;
 const VALID_APP_MODES = new Set(['local', 'hosted', 'test']);
-const requestedAppMode = (process.env.APP_MODE || (process.env.NODE_ENV === 'test' ? 'test' : 'local')).toLowerCase();
-const APP_MODE = VALID_APP_MODES.has(requestedAppMode) ? requestedAppMode : 'local';
+const DEFAULT_APP_MODE = process.env.NODE_ENV === 'test' ? 'test' : 'local';
+const requestedAppMode = (process.env.APP_MODE || DEFAULT_APP_MODE).toLowerCase();
+const APP_MODE = VALID_APP_MODES.has(requestedAppMode) ? requestedAppMode : DEFAULT_APP_MODE;
 const isLocalMode = APP_MODE === 'local' || APP_MODE === 'test';
 const SECRET_ENCRYPTION_VERSION = 1;
 
@@ -258,15 +259,21 @@ const getSecretKeyMaterial = () => {
     throw new Error('CONTACTBRIDGE_SECRET_KEY is required to store or read encrypted source account secrets in hosted mode.');
   }
 
-  const existingSecret = sqlite.prepare('SELECT value FROM app_settings WHERE key = ?').get('local_secret') as { value?: string } | undefined;
+  const existingSecret = db.select().from(schema.appSettings)
+    .where(eq(schema.appSettings.key, 'local_secret'))
+    .get();
   if (existingSecret?.value) {
     return existingSecret.value;
   }
 
-  const now = Date.now();
+  const now = new Date();
   const generatedSecret = crypto.randomBytes(32).toString('base64');
-  sqlite.prepare('INSERT INTO app_settings (key, value, created_at, updated_at) VALUES (?, ?, ?, ?)')
-    .run('local_secret', generatedSecret, now, now);
+  db.insert(schema.appSettings).values({
+    key: 'local_secret',
+    value: generatedSecret,
+    createdAt: now,
+    updatedAt: now
+  }).run();
   return generatedSecret;
 };
 
@@ -714,6 +721,8 @@ const getLinkedInProfilePictureUrl = (profilePicture: any) => {
   return '';
 };
 
+const serializeCandidateEvidenceReference = (handle: string, candidateId: string) => JSON.stringify({ candidateId, handle });
+
 const addCandidateMatchEvidence = (
   candidateId: string,
   profileId: string,
@@ -780,7 +789,7 @@ function assignProfileToCandidate(profileIdToUse: string, displayName: string, h
       if (candidateProfile?.contactCandidateId) {
         reviewEvidence.push({
           evidenceType: 'cross_source_handle_review',
-          evidenceValue: `${normalizedHandle}:${candidateProfile.contactCandidateId}`,
+          evidenceValue: serializeCandidateEvidenceReference(normalizedHandle, candidateProfile.contactCandidateId),
           score: 75
         });
         break;

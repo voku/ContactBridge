@@ -76,3 +76,10 @@ export const syncJobs = sqliteTable('sync_jobs', {
   errorCode: text('error_code'),
   errorMessageSafe: text('error_message_safe')
 });
+
+export const appSettings = sqliteTable('app_settings', {
+  key: text('key').primaryKey(),
+  value: text('value').notNull(),
+  createdAt: integer('created_at', { mode: 'timestamp' }),
+  updatedAt: integer('updated_at', { mode: 'timestamp' })
+});
