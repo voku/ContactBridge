@@ -1050,7 +1050,7 @@ async function startServer() {
     }
   });
 
-  app.get(['/auth/x/callback', '/auth/x/callback/'], async (req, res) => {
+  app.get(['/auth/x/callback', '/auth/x/callback/'], syncRateLimiter, async (req, res) => {
     const { state, code } = req.query;
     const store = typeof state === 'string' ? getOauthStateEntry(oauthStore, state) : null;
 
@@ -1138,7 +1138,7 @@ async function startServer() {
     }
   });
 
-  app.get(['/auth/google/callback', '/auth/google/callback/'], async (req, res) => {
+  app.get(['/auth/google/callback', '/auth/google/callback/'], syncRateLimiter, async (req, res) => {
     const { state, code } = req.query;
     const store = typeof state === 'string' ? getOauthStateEntry(googleOauthStore, state) : null;
 
@@ -1210,14 +1210,15 @@ async function startServer() {
       const storedAuth = rawAccessToken ? null : getStoredSourceAccountAuth(sourceAccountId).authData;
       const accessToken = trimMaybeString(rawAccessToken) || trimMaybeString(storedAuth?.accessToken);
 
+      if (!accessToken) {
+        throw new Error('An X access token is required. Please reconnect your X account.');
+      }
+
       if (demoData) {
         stream.progress('Loading demo data...');
         followers = demoData.followersResponse?.data || [];
         follows = demoData.followingResponse?.data || [];
       } else {
-        if (!accessToken) {
-          throw new Error('An X access token is required. Please reconnect your X account.');
-        }
         stream.progress('Connecting to API...');
         const client = new TwitterApi(accessToken);
 
@@ -1661,6 +1662,17 @@ async function startServer() {
         pages?: Array<{ connections?: any[] }>,
         connections?: any[]
       }>('google');
+      const storedAuth = (!tokens && !clientId && !clientSecret && !token)
+        ? getStoredSourceAccountAuth(sourceAccountId).authData
+        : null;
+      const resolvedTokens = tokens || storedAuth?.tokens;
+      const resolvedClientId = trimMaybeString(clientId) || trimMaybeString(storedAuth?.clientId);
+      const resolvedClientSecret = trimMaybeString(clientSecret) || trimMaybeString(storedAuth?.clientSecret);
+      const resolvedToken = trimMaybeString(token) || trimMaybeString(storedAuth?.accessToken);
+
+      if (!resolvedTokens && !resolvedToken) {
+        throw new Error('A Google access token is required. Please reconnect Google Contacts.');
+      }
 
       if (demoData) {
         stream.progress('Loading demo data...');
@@ -1669,21 +1681,11 @@ async function startServer() {
           : demoData.connections || [];
       } else {
         const { OAuth2Client } = await import('google-auth-library');
-        const storedAuth = (!tokens && !clientId && !clientSecret && !token)
-          ? getStoredSourceAccountAuth(sourceAccountId).authData
-          : null;
-        const resolvedTokens = tokens || storedAuth?.tokens;
-        const resolvedClientId = trimMaybeString(clientId) || trimMaybeString(storedAuth?.clientId);
-        const resolvedClientSecret = trimMaybeString(clientSecret) || trimMaybeString(storedAuth?.clientSecret);
-        const resolvedToken = trimMaybeString(token) || trimMaybeString(storedAuth?.accessToken);
         let authClient: any;
         if (resolvedClientId && resolvedClientSecret && resolvedTokens) {
           authClient = new OAuth2Client(resolvedClientId, resolvedClientSecret);
           authClient.setCredentials(resolvedTokens);
         } else {
-          if (!resolvedToken) {
-            throw new Error('A Google access token is required. Please reconnect Google Contacts.');
-          }
           authClient = new OAuth2Client();
           authClient.setCredentials({ access_token: resolvedToken });
         }
