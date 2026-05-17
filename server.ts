@@ -95,8 +95,8 @@ const loadDemoFixture = async <T>(integration: string): Promise<T | null> => {
     const filePath = path.join(demoDataDir, `${integration}.json`);
     const raw = await fs.readFile(filePath, 'utf8');
     return JSON.parse(raw) as T;
-  } catch (error: any) {
-    if (error?.code === 'ENOENT') {
+  } catch (error: unknown) {
+    if (typeof error === 'object' && error !== null && 'code' in error && error.code === 'ENOENT') {
       return null;
     }
     throw error;
@@ -143,7 +143,9 @@ const normalizeMastodonInstanceUrl = (instance: string) => {
   }
 
   if (net.isIP(hostname)) {
+    // fc00::/7 and fd00::/8 unique local IPv6 address ranges.
     const isUniqueLocalIpv6 = /^(fc|fd)[0-9a-f]{2}:/i.test(hostname);
+    // fe80::/10 link-local IPv6 address range.
     const isLinkLocalIpv6 = /^fe[89ab][0-9a-f]:/i.test(hostname);
 
     if (
@@ -230,16 +232,6 @@ async function startServer() {
 
   app.use(cors());
   app.use(express.json());
-  app.use([
-    '/api/auth/x/url',
-    '/api/auth/google/url',
-    '/api/sync/bluesky',
-    '/api/sync/mastodon',
-    '/api/sync/x',
-    '/api/sync/linkedin',
-    '/api/sync/github',
-    '/api/sync/google'
-  ], syncRateLimiter);
 
   // --- API ROUTES ---
   app.get("/api/health", (req, res) => {
@@ -395,7 +387,7 @@ async function startServer() {
   };
 
   // AT-Protocol implementation (Bluesky sync job)
-  app.post("/api/sync/bluesky", async (req, res) => {
+  app.post("/api/sync/bluesky", syncRateLimiter, async (req, res) => {
     const { sourceAccountId, identifier, password } = req.body;
     const syncJobId = uuidv4();
     const now = new Date();
@@ -521,7 +513,7 @@ async function startServer() {
     }
   });
 
-  app.post("/api/sync/mastodon", async (req, res) => {
+  app.post("/api/sync/mastodon", syncRateLimiter, async (req, res) => {
     const { sourceAccountId, instance, token } = req.body;
     const syncJobId = uuidv4();
     const now = new Date();
@@ -678,7 +670,7 @@ async function startServer() {
 
   const oauthStore = new Map<string, { codeVerifier: string, state: string, clientId: string, clientSecret: string }>();
 
-  app.post('/api/auth/x/url', (req, res) => {
+  app.post('/api/auth/x/url', syncRateLimiter, (req, res) => {
     try {
       const { clientId, clientSecret } = req.body;
       if (!clientId || !clientSecret) {
@@ -739,7 +731,7 @@ async function startServer() {
 
   const googleOauthStore = new Map<string, { clientId: string, clientSecret: string }>();
 
-  app.post('/api/auth/google/url', async (req, res) => {
+  app.post('/api/auth/google/url', syncRateLimiter, async (req, res) => {
     try {
       const { clientId, clientSecret } = req.body;
       if (!clientId || !clientSecret) {
@@ -799,7 +791,7 @@ async function startServer() {
     }
   });
 
-  app.post("/api/sync/x", async (req, res) => {
+  app.post("/api/sync/x", syncRateLimiter, async (req, res) => {
     const { sourceAccountId, accessToken } = req.body;
     const syncJobId = uuidv4();
     const now = new Date();
@@ -935,7 +927,7 @@ async function startServer() {
     }
   });
 
-  app.post("/api/sync/linkedin", async (req, res) => {
+  app.post("/api/sync/linkedin", syncRateLimiter, async (req, res) => {
     const { sourceAccountId, handle, token } = req.body;
     const syncJobId = uuidv4();
     const now = new Date();
@@ -1061,7 +1053,7 @@ async function startServer() {
     }
   });
 
-  app.post("/api/sync/github", async (req, res) => {
+  app.post("/api/sync/github", syncRateLimiter, async (req, res) => {
     const { sourceAccountId, token } = req.body;
     const syncJobId = uuidv4();
     const now = new Date();
@@ -1230,7 +1222,7 @@ async function startServer() {
     }
   });
 
-  app.post("/api/sync/google", async (req, res) => {
+  app.post("/api/sync/google", syncRateLimiter, async (req, res) => {
     const { sourceAccountId, tokens, clientId, clientSecret, token } = req.body;
     const syncJobId = uuidv4();
     const now = new Date();

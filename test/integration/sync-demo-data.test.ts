@@ -78,6 +78,9 @@ const getFreePort = async (): Promise<number> => {
   const address = server.address();
   const port = typeof address === 'object' && address ? address.port : 0;
   await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
+  if (port === 0) {
+    throw new Error('Failed to allocate a test port');
+  }
   return port;
 };
 
