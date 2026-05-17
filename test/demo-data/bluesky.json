@@ -1,0 +1,20 @@
+{
+  "followers": [
+    {
+      "did": "did:plc:alice-demo",
+      "handle": "alice-demo.bsky.social",
+      "displayName": "Alice Demo",
+      "avatar": "https://example.com/alice-demo.jpg",
+      "description": "Design systems lead"
+    }
+  ],
+  "follows": [
+    {
+      "did": "did:plc:bob-demo",
+      "handle": "bob-demo.bsky.social",
+      "displayName": "Bob Demo",
+      "avatar": "https://example.com/bob-demo.jpg",
+      "description": "Backend engineer"
+    }
+  ]
+}

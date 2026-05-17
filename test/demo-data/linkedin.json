@@ -1,0 +1,40 @@
+{
+  "elements": [
+    {
+      "to": "linkedin-1",
+      "firstName": {
+        "localized": {
+          "en_US": "Grace"
+        }
+      },
+      "lastName": {
+        "localized": {
+          "en_US": "Demo"
+        }
+      },
+      "profilePicture": {
+        "displayImage": "https://example.com/grace-demo.jpg"
+      },
+      "publicIdentifier": "grace-demo",
+      "headline": "Product manager"
+    },
+    {
+      "to": "linkedin-2",
+      "firstName": {
+        "localized": {
+          "en_US": "Heidi"
+        }
+      },
+      "lastName": {
+        "localized": {
+          "en_US": "Demo"
+        }
+      },
+      "profilePicture": {
+        "displayImage": "https://example.com/heidi-demo.jpg"
+      },
+      "publicIdentifier": "heidi-demo",
+      "headline": "Growth lead"
+    }
+  ]
+}

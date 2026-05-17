@@ -1,0 +1,25 @@
+{
+  "selfAccount": {
+    "id": "demo-self"
+  },
+  "followers": [
+    {
+      "id": "mastodon-1",
+      "acct": "carol@mastodon.social",
+      "display_name": "Carol Demo",
+      "username": "carol",
+      "avatar": "https://example.com/carol-demo.jpg",
+      "note": "<p>Open source maintainer</p>"
+    }
+  ],
+  "following": [
+    {
+      "id": "mastodon-2",
+      "acct": "dave@fosstodon.org",
+      "display_name": "Dave Demo",
+      "username": "dave",
+      "avatar": "https://example.com/dave-demo.jpg",
+      "note": "<p>Community builder</p>"
+    }
+  ]
+}

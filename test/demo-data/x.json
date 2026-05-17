@@ -1,0 +1,20 @@
+{
+  "followers": [
+    {
+      "id": "x-1",
+      "username": "eve_demo",
+      "name": "Eve Demo",
+      "profile_image_url": "https://example.com/eve-demo.jpg",
+      "description": "AI researcher"
+    }
+  ],
+  "follows": [
+    {
+      "id": "x-2",
+      "username": "frank_demo",
+      "name": "Frank Demo",
+      "profile_image_url": "https://example.com/frank-demo.jpg",
+      "description": "Developer advocate"
+    }
+  ]
+}

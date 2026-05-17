@@ -1,0 +1,63 @@
+{
+  "connections": [
+    {
+      "resourceName": "people/cathy-demo",
+      "names": [
+        {
+          "displayName": "Cathy Demo"
+        }
+      ],
+      "emailAddresses": [
+        {
+          "value": "cathy@example.com"
+        }
+      ],
+      "photos": [
+        {
+          "url": "https://example.com/cathy-demo.jpg",
+          "default": false
+        }
+      ],
+      "biographies": [
+        {
+          "value": "Partnerships manager"
+        }
+      ],
+      "urls": [
+        {
+          "value": "https://example.com/cathy"
+        }
+      ]
+    },
+    {
+      "resourceName": "people/louis-demo",
+      "names": [
+        {
+          "displayName": "Louis Demo"
+        }
+      ],
+      "emailAddresses": [
+        {
+          "value": "louis@example.com"
+        }
+      ],
+      "photos": [
+        {
+          "url": "https://example.com/louis-demo.jpg",
+          "default": false
+        }
+      ],
+      "organizations": [
+        {
+          "title": "Engineering Manager",
+          "name": "Example Co"
+        }
+      ],
+      "urls": [
+        {
+          "value": "https://example.com/louis"
+        }
+      ]
+    }
+  ]
+}

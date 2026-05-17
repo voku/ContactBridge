@@ -54,6 +54,7 @@ The local development server runs the Express backend and serves the Vite fronte
 ## Scripts
 
 - `npm run dev`: start the local Express + Vite app
+- `npm run test:integration`: run backend integration tests with bundled demo fixtures
 - `npm run lint`: run TypeScript checks
 - `npm run build:client`: build the static frontend only
 - `npm run build`: build the frontend and bundle the Node server
@@ -110,6 +111,7 @@ You are reviewing the ContactBridge repository. Identify the key files for this 
 Before opening a pull request, run:
 
 ```bash
+npm run test:integration
 npm run lint
 npm run build
 ```

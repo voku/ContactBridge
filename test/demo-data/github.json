@@ -1,0 +1,16 @@
+{
+  "followers": [
+    {
+      "id": 101,
+      "login": "ivan-demo",
+      "avatar_url": "https://example.com/ivan-demo.jpg"
+    }
+  ],
+  "following": [
+    {
+      "id": 102,
+      "login": "judy-demo",
+      "avatar_url": "https://example.com/judy-demo.jpg"
+    }
+  ]
+}
