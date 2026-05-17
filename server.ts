@@ -1,5 +1,6 @@
 import express from "express";
 import fs from "fs/promises";
+import net from "net";
 import path from "path";
 import cors from "cors";
 import dotenv from "dotenv";
@@ -100,6 +101,45 @@ const loadDemoFixture = async <T>(integration: string): Promise<T | null> => {
     }
     throw error;
   }
+};
+
+const normalizeMastodonInstanceUrl = (instance: string) => {
+  const candidate = instance.startsWith('http://') || instance.startsWith('https://')
+    ? instance
+    : `https://${instance}`;
+  const instanceUrl = new URL(candidate);
+
+  if (instanceUrl.protocol !== 'https:') {
+    throw new Error('Mastodon instance URL must use HTTPS');
+  }
+
+  const hostname = instanceUrl.hostname.toLowerCase();
+  if (!hostname || hostname === 'localhost' || hostname.endsWith('.local')) {
+    throw new Error('Mastodon instance URL must use a public hostname');
+  }
+
+  if (net.isIP(hostname)) {
+    if (
+      hostname === '::1' ||
+      hostname === '::' ||
+      hostname.startsWith('fc') ||
+      hostname.startsWith('fd') ||
+      hostname.startsWith('fe80:') ||
+      /^10\./.test(hostname) ||
+      /^127\./.test(hostname) ||
+      /^169\.254\./.test(hostname) ||
+      /^192\.168\./.test(hostname) ||
+      /^172\.(1[6-9]|2\d|3[0-1])\./.test(hostname)
+    ) {
+      throw new Error('Mastodon instance URL must not target a private or loopback address');
+    }
+  }
+
+  instanceUrl.pathname = '';
+  instanceUrl.search = '';
+  instanceUrl.hash = '';
+
+  return instanceUrl.toString().replace(/\/$/, '');
 };
 
 function assignProfileToCandidate(profileIdToUse: string, displayName: string, handle: string, now: Date) {
@@ -348,10 +388,10 @@ async function startServer() {
         await agent.login({ identifier, password });
 
         stream.progress('Fetching followers...');
-        followersResponse = await agent.getFollowers({ actor: demoData?.session?.did || agent.session!.did });
+        followersResponse = await agent.getFollowers({ actor: agent.session!.did });
         
         stream.progress('Fetching follows...');
-        followsResponse = await agent.getFollows({ actor: demoData?.session?.did || agent.session!.did });
+        followsResponse = await agent.getFollows({ actor: agent.session!.did });
       }
       
       const allProfilesMap = new Map();
@@ -468,7 +508,7 @@ async function startServer() {
         followers = demoData.followers || [];
         following = demoData.following || [];
       } else {
-        const instanceUrl = instance.startsWith('http') ? instance : `https://${instance}`;
+        const instanceUrl = normalizeMastodonInstanceUrl(instance);
         
         let verifyRes;
         try {
@@ -1056,8 +1096,6 @@ async function startServer() {
             throw new Error(`Failed to verify GitHub credentials: ${verifyRes.status} ${verifyRes.statusText}`);
           }
         }
-
-        await verifyRes.json();
 
         stream.progress('Fetching followers...');
         followers = await fetchAllGitHubPages(`https://api.github.com/user/followers?per_page=100`);
