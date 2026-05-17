@@ -1,5 +1,6 @@
 import express from "express";
 import fs from "fs/promises";
+import * as crypto from "crypto";
 import net from "net";
 import path from "path";
 import cors from "cors";
@@ -27,6 +28,15 @@ sqlite.exec(`
     auth_data TEXT,
     created_at INTEGER,
     updated_at INTEGER
+  );
+
+  CREATE TABLE IF NOT EXISTS source_account_secrets (
+    source_account_id TEXT PRIMARY KEY,
+    encrypted_payload TEXT NOT NULL,
+    encryption_version INTEGER NOT NULL,
+    created_at INTEGER,
+    updated_at INTEGER,
+    FOREIGN KEY (source_account_id) REFERENCES source_accounts(id)
   );
 
   CREATE TABLE IF NOT EXISTS social_profiles (
@@ -65,6 +75,18 @@ sqlite.exec(`
   CREATE TABLE IF NOT EXISTS contact_candidate_profiles (
     contact_candidate_id TEXT,
     social_profile_id TEXT
+  );
+
+  CREATE TABLE IF NOT EXISTS candidate_match_evidence (
+    id TEXT PRIMARY KEY,
+    candidate_id TEXT,
+    profile_id TEXT,
+    evidence_type TEXT NOT NULL,
+    evidence_value TEXT,
+    score INTEGER NOT NULL,
+    created_at INTEGER,
+    FOREIGN KEY (candidate_id) REFERENCES contact_candidates(id),
+    FOREIGN KEY (profile_id) REFERENCES social_profiles(id)
   );
 
   CREATE TABLE IF NOT EXISTS sync_jobs (
@@ -181,6 +203,57 @@ const normalizeMastodonInstanceUrl = (instance: string) => {
 
 const MANUAL_CAPTURE_SOURCES = new Set(['bluesky', 'linkedin', 'x', 'xing']);
 const OAUTH_STATE_TTL_MS = 10 * 60 * 1000;
+const VALID_APP_MODES = new Set(['local', 'hosted', 'test']);
+const requestedAppMode = (process.env.APP_MODE || (process.env.NODE_ENV === 'test' ? 'test' : 'local')).toLowerCase();
+const APP_MODE = VALID_APP_MODES.has(requestedAppMode) ? requestedAppMode : 'local';
+const isLocalMode = APP_MODE === 'local' || APP_MODE === 'test';
+const SECRET_ENCRYPTION_VERSION = 1;
+const LOCAL_SECRET_FALLBACK = 'contactbridge-local-development-secret';
+
+const parseOriginList = (value: string | undefined) => (value || '')
+  .split(',')
+  .map((origin) => origin.trim())
+  .filter(Boolean);
+
+const parseConfiguredOrigin = (value: string | undefined) => {
+  const trimmed = value?.trim();
+  if (!trimmed) return null;
+  try {
+    return new URL(trimmed).origin;
+  } catch {
+    return null;
+  }
+};
+
+const isLoopbackOrigin = (origin: string) => {
+  try {
+    const url = new URL(origin);
+    return (url.protocol === 'http:' || url.protocol === 'https:')
+      && ['localhost', '127.0.0.1', '[::1]'].includes(url.hostname);
+  } catch {
+    return false;
+  }
+};
+
+const getCorsAllowedOrigins = () => {
+  const origins = new Set(parseOriginList(process.env.CONTACTBRIDGE_CORS_ORIGINS));
+  const appOrigin = parseConfiguredOrigin(process.env.APP_URL);
+  const frontendOrigin = parseConfiguredOrigin(process.env.VITE_API_BASE_URL);
+
+  if (appOrigin) origins.add(appOrigin);
+  if (frontendOrigin) origins.add(frontendOrigin);
+  return origins;
+};
+
+const getSecretKeyMaterial = () => {
+  const configured = process.env.CONTACTBRIDGE_SECRET_KEY?.trim();
+  if (configured) return configured;
+  if (isLocalMode) return LOCAL_SECRET_FALLBACK;
+  throw new Error('CONTACTBRIDGE_SECRET_KEY is required to store or read encrypted source account secrets in hosted mode.');
+};
+
+const getSecretEncryptionKey = () => crypto.createHash('sha256').update(getSecretKeyMaterial()).digest();
+
 
 const trimMaybeString = (value: unknown) => typeof value === 'string' ? value.trim() : '';
 const normalizeProfileHandle = (value: unknown) => trimMaybeString(value).replace(/^@+/, '').toLowerCase();
@@ -364,6 +437,45 @@ const parseSourceAccountAuthData = (authData: string | null | undefined): Source
   }
 };
 
+const encryptSecretPayload = (payload: SourceAccountAuthData) => {
+  const iv = crypto.randomBytes(12);
+  const cipher = crypto.createCipheriv('aes-256-gcm', getSecretEncryptionKey(), iv);
+  const ciphertext = Buffer.concat([cipher.update(JSON.stringify(payload), 'utf8'), cipher.final()]);
+  const tag = cipher.getAuthTag();
+
+  return JSON.stringify({
+    alg: 'aes-256-gcm',
+    iv: iv.toString('base64'),
+    tag: tag.toString('base64'),
+    ciphertext: ciphertext.toString('base64')
+  });
+};
+
+const decryptSecretPayload = (encryptedPayload: string): SourceAccountAuthData | null => {
+  try {
+    const payload = JSON.parse(encryptedPayload);
+    if (!payload || payload.alg !== 'aes-256-gcm') {
+      return null;
+    }
+
+    const decipher = crypto.createDecipheriv(
+      'aes-256-gcm',
+      getSecretEncryptionKey(),
+      Buffer.from(payload.iv, 'base64')
+    );
+    decipher.setAuthTag(Buffer.from(payload.tag, 'base64'));
+    const decrypted = Buffer.concat([
+      decipher.update(Buffer.from(payload.ciphertext, 'base64')),
+      decipher.final()
+    ]).toString('utf8');
+
+    const parsed = JSON.parse(decrypted);
+    return parsed && typeof parsed === 'object' ? parsed as SourceAccountAuthData : null;
+  } catch {
+    return null;
+  }
+};
+
 const getSourceAccount = (id: string) => db.select().from(schema.sourceAccounts)
   .where(eq(schema.sourceAccounts.id, id))
   .get();
@@ -374,15 +486,47 @@ const getStoredSourceAccountAuth = (sourceAccountId: string) => {
     throw new Error('Source account not found');
   }
 
-  const authData = parseSourceAccountAuthData(account.authData);
-  return { account, authData };
+  const secret = db.select().from(schema.sourceAccountSecrets)
+    .where(eq(schema.sourceAccountSecrets.sourceAccountId, sourceAccountId))
+    .get();
+  const encryptedAuthData = secret ? decryptSecretPayload(secret.encryptedPayload) : null;
+  const legacyAuthData = encryptedAuthData ? null : parseSourceAccountAuthData(account.authData);
+
+  return { account, authData: encryptedAuthData || legacyAuthData };
 };
 
 const storeSourceAccountAuth = (sourceAccountId: string, authData: SourceAccountAuthData) => {
+  const now = new Date();
+  const encryptedPayload = encryptSecretPayload(authData);
+  const existingSecret = db.select().from(schema.sourceAccountSecrets)
+    .where(eq(schema.sourceAccountSecrets.sourceAccountId, sourceAccountId))
+    .get();
+
+  if (existingSecret) {
+    db.update(schema.sourceAccountSecrets)
+      .set({
+        encryptedPayload,
+        encryptionVersion: SECRET_ENCRYPTION_VERSION,
+        updatedAt: now
+      })
+      .where(eq(schema.sourceAccountSecrets.sourceAccountId, sourceAccountId))
+      .run();
+  } else {
+    db.insert(schema.sourceAccountSecrets)
+      .values({
+        sourceAccountId,
+        encryptedPayload,
+        encryptionVersion: SECRET_ENCRYPTION_VERSION,
+        createdAt: now,
+        updatedAt: now
+      })
+      .run();
+  }
+
   db.update(schema.sourceAccounts)
     .set({
-      authData: JSON.stringify(authData),
-      updatedAt: new Date()
+      authData: null,
+      updatedAt: now
     })
     .where(eq(schema.sourceAccounts.id, sourceAccountId))
     .run();
@@ -461,6 +605,9 @@ const cleanupOrphanedProfiles = (socialProfileIds: Iterable<string>) => {
       .map((entry) => entry.contactCandidateId)
       .filter((candidateId): candidateId is string => Boolean(candidateId));
 
+    db.delete(schema.candidateMatchEvidence)
+      .where(eq(schema.candidateMatchEvidence.profileId, socialProfileId))
+      .run();
     db.delete(schema.contactCandidateProfiles)
       .where(eq(schema.contactCandidateProfiles.socialProfileId, socialProfileId))
       .run();
@@ -549,59 +696,117 @@ const getLinkedInProfilePictureUrl = (profilePicture: any) => {
   return '';
 };
 
+const addCandidateMatchEvidence = (
+  candidateId: string,
+  profileId: string,
+  evidenceType: string,
+  evidenceValue: string | null,
+  score: number,
+  now: Date
+) => {
+  db.insert(schema.candidateMatchEvidence).values({
+    id: uuidv4(),
+    candidateId,
+    profileId,
+    evidenceType,
+    evidenceValue,
+    score,
+    createdAt: now
+  }).run();
+};
+
 function assignProfileToCandidate(profileIdToUse: string, displayName: string, handle: string, now: Date) {
   const normalizedHandle = normalizeProfileHandle(handle);
   const existingCandidateProfile = db.select().from(schema.contactCandidateProfiles)
     .where(eq(schema.contactCandidateProfiles.socialProfileId, profileIdToUse))
     .get();
 
-  if (!existingCandidateProfile) {
-    let matchedCandidateId = null;
-    
-    if (normalizedHandle) {
-      const handles = db.select().from(schema.socialProfiles)
-        .where(eq(schema.socialProfiles.handle, normalizedHandle)).all();
-      
-      for (const p of handles) {
-        if (p.id === profileIdToUse) continue;
-        const cp = db.select().from(schema.contactCandidateProfiles)
-          .where(eq(schema.contactCandidateProfiles.socialProfileId, p.id)).get();
-        if (cp) {
-          matchedCandidateId = cp.contactCandidateId;
-          break;
-        }
+  if (existingCandidateProfile) {
+    return;
+  }
+
+  const currentProfile = db.select().from(schema.socialProfiles)
+    .where(eq(schema.socialProfiles.id, profileIdToUse))
+    .get();
+  let matchedCandidateId: string | null = null;
+  const reviewEvidence: Array<{ evidenceType: string; evidenceValue: string; score: number }> = [];
+
+  if (currentProfile?.sourceType && normalizedHandle) {
+    const sameSourceHandleProfiles = db.select().from(schema.socialProfiles)
+      .where(and(
+        eq(schema.socialProfiles.sourceType, currentProfile.sourceType),
+        eq(schema.socialProfiles.handle, normalizedHandle)
+      )).all();
+
+    for (const profile of sameSourceHandleProfiles) {
+      if (profile.id === profileIdToUse) continue;
+      const candidateProfile = db.select().from(schema.contactCandidateProfiles)
+        .where(eq(schema.contactCandidateProfiles.socialProfileId, profile.id))
+        .get();
+      if (candidateProfile?.contactCandidateId) {
+        matchedCandidateId = candidateProfile.contactCandidateId;
+        addCandidateMatchEvidence(matchedCandidateId, profileIdToUse, 'same_source_handle', normalizedHandle, 90, now);
+        break;
       }
     }
+  }
 
-    if (!matchedCandidateId && displayName) {
-      const cd = db.select().from(schema.contactCandidates)
-        .where(eq(schema.contactCandidates.canonicalName, displayName)).get();
-      if (cd) {
-        matchedCandidateId = cd.id;
+  if (!matchedCandidateId && normalizedHandle) {
+    const crossSourceHandleProfiles = db.select().from(schema.socialProfiles)
+      .where(eq(schema.socialProfiles.handle, normalizedHandle)).all();
+    for (const profile of crossSourceHandleProfiles) {
+      if (profile.id === profileIdToUse || profile.sourceType === currentProfile?.sourceType) continue;
+      const candidateProfile = db.select().from(schema.contactCandidateProfiles)
+        .where(eq(schema.contactCandidateProfiles.socialProfileId, profile.id))
+        .get();
+      if (candidateProfile?.contactCandidateId) {
+        reviewEvidence.push({
+          evidenceType: 'cross_source_handle_review',
+          evidenceValue: `${normalizedHandle}:${candidateProfile.contactCandidateId}`,
+          score: 75
+        });
+        break;
       }
     }
+  }
 
-    if (matchedCandidateId) {
-      db.insert(schema.contactCandidateProfiles).values({
-        contactCandidateId: matchedCandidateId,
-        socialProfileId: profileIdToUse
-      }).run();
-      } else {
-        const candidateId = uuidv4();
-        db.insert(schema.contactCandidates).values({
-          id: candidateId,
-          canonicalName: displayName || normalizedHandle || 'Unknown',
-          confidenceScore: 50,
-          status: 'pending',
-          createdAt: now,
-        updatedAt: now
-      }).run();
-
-      db.insert(schema.contactCandidateProfiles).values({
-        contactCandidateId: candidateId,
-        socialProfileId: profileIdToUse
-      }).run();
+  if (!matchedCandidateId && displayName) {
+    const sameNameCandidate = db.select().from(schema.contactCandidates)
+      .where(eq(schema.contactCandidates.canonicalName, displayName)).get();
+    if (sameNameCandidate?.id) {
+      reviewEvidence.push({
+        evidenceType: 'display_name_only_review',
+        evidenceValue: displayName,
+        score: 20
+      });
     }
+  }
+
+  if (matchedCandidateId) {
+    db.insert(schema.contactCandidateProfiles).values({
+      contactCandidateId: matchedCandidateId,
+      socialProfileId: profileIdToUse
+    }).run();
+    return;
+  }
+
+  const candidateId = uuidv4();
+  db.insert(schema.contactCandidates).values({
+    id: candidateId,
+    canonicalName: displayName || normalizedHandle || 'Unknown',
+    confidenceScore: reviewEvidence[0]?.score || 50,
+    status: 'pending',
+    createdAt: now,
+    updatedAt: now
+  }).run();
+
+  db.insert(schema.contactCandidateProfiles).values({
+    contactCandidateId: candidateId,
+    socialProfileId: profileIdToUse
+  }).run();
+
+  for (const evidence of reviewEvidence) {
+    addCandidateMatchEvidence(candidateId, profileIdToUse, evidence.evidenceType, evidence.evidenceValue, evidence.score, now);
   }
 }
 
@@ -609,23 +814,39 @@ async function startServer() {
   const app = express();
   const PORT = Number(process.env.PORT || 3000);
   const syncRateLimiter = createRateLimiter(60_000, 10);
+  const corsAllowedOrigins = getCorsAllowedOrigins();
 
-  app.use(cors());
-  app.use(express.json());
+  app.use(cors({
+    origin: (origin, callback) => {
+      if (!origin || corsAllowedOrigins.has(origin) || (isLocalMode && isLoopbackOrigin(origin))) {
+        callback(null, true);
+        return;
+      }
+
+      callback(new Error('CORS origin is not allowed by ContactBridge configuration.'));
+    }
+  }));
+  app.use(express.json({ limit: '1mb' }));
 
   // --- API ROUTES ---
   app.get("/api/health", (req, res) => {
-    res.json({ status: "ok" });
+    res.json({ status: "ok", appMode: APP_MODE });
   });
 
   app.delete("/api/database", (req, res) => {
+    if (!isLocalMode) {
+      return res.status(403).json({ error: "Database reset is only available in local or test mode." });
+    }
+
     try {
       sqlite.transaction(() => {
+        db.delete(schema.candidateMatchEvidence).run();
         db.delete(schema.contactCandidateProfiles).run();
         db.delete(schema.relationshipEdges).run();
         db.delete(schema.syncJobs).run();
         db.delete(schema.contactCandidates).run();
         db.delete(schema.socialProfiles).run();
+        db.delete(schema.sourceAccountSecrets).run();
         db.delete(schema.sourceAccounts).run();
       })();
 
@@ -652,7 +873,19 @@ async function startServer() {
   });
 
   app.post("/api/source-accounts", (req, res) => {
-    const { sourceType, accountIdentifier, displayName, authStatus } = req.body;
+    const sourceType = trimMaybeString(req.body?.sourceType).toLowerCase();
+    const accountIdentifier = trimMaybeString(req.body?.accountIdentifier);
+    const displayName = trimMaybeString(req.body?.displayName);
+    const authStatus = trimMaybeString(req.body?.authStatus) || 'pending';
+
+    if (!['bluesky', 'github', 'google', 'linkedin', 'mastodon', 'x', 'xing'].includes(sourceType)) {
+      return res.status(400).json({ error: 'Unsupported source type.' });
+    }
+
+    if (authStatus && !['pending', 'connected', 'failed', 'disconnected'].includes(authStatus)) {
+      return res.status(400).json({ error: 'Unsupported auth status.' });
+    }
+
     const now = new Date();
     const id = uuidv4();
     db.insert(schema.sourceAccounts).values({
@@ -673,6 +906,7 @@ async function startServer() {
     try {
       db.transaction(() => {
         db.delete(schema.syncJobs).where(eq(schema.syncJobs.sourceAccountId, id)).run();
+        db.delete(schema.sourceAccountSecrets).where(eq(schema.sourceAccountSecrets.sourceAccountId, id)).run();
         const relatedProfileIds = clearSourceRelationships(id);
         db.delete(schema.sourceAccounts).where(eq(schema.sourceAccounts.id, id)).run();
         cleanupOrphanedProfiles(relatedProfileIds);
@@ -764,6 +998,9 @@ async function startServer() {
             .where(eq(schema.contactCandidateProfiles.contactCandidateId, id))
             .run();
 
+          db.delete(schema.candidateMatchEvidence)
+            .where(eq(schema.candidateMatchEvidence.candidateId, id))
+            .run();
           db.delete(schema.contactCandidates)
             .where(eq(schema.contactCandidates.id, id))
             .run();
@@ -805,7 +1042,12 @@ async function startServer() {
 
   app.patch("/api/candidates/:id", (req, res) => {
     const { id } = req.params;
-    const { status, notes } = req.body;
+    const status = req.body?.status === undefined ? undefined : trimMaybeString(req.body.status);
+    const notes = req.body?.notes === undefined ? undefined : trimMaybeString(req.body.notes);
+
+    if (status !== undefined && !['pending', 'approved', 'rejected'].includes(status)) {
+      return res.status(400).json({ error: 'Unsupported candidate status.' });
+    }
     
     const updateData: any = { updatedAt: new Date() };
     if (status !== undefined) updateData.status = status;
@@ -1935,6 +2177,16 @@ async function startServer() {
         if (parsedProfileUrl.protocol !== 'https:' && parsedProfileUrl.protocol !== 'http:') {
           throw new Error('Unsupported protocol');
         }
+
+        const profileHostname = parsedProfileUrl.hostname.toLowerCase();
+        const sourceHostIsValid = (source === 'linkedin' && /(^|\.)linkedin\.com$/.test(profileHostname))
+          || (source === 'x' && (/(^|\.)x\.com$/.test(profileHostname) || /(^|\.)twitter\.com$/.test(profileHostname)))
+          || (source === 'xing' && /(^|\.)xing\.com$/.test(profileHostname))
+          || (source === 'bluesky' && profileHostname === 'bsky.app');
+        if (!sourceHostIsValid) {
+          return res.status(400).json({ error: 'Profile URL host does not match the selected source.' });
+        }
+
         normalizedProfileUrl = parsedProfileUrl.toString();
       } catch {
         return res.status(400).json({ error: 'Profile URL must be a valid absolute URL.' });

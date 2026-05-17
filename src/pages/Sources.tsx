@@ -674,7 +674,7 @@ export default function Sources() {
             <div>
               <CardTitle className="text-lg">LinkedIn</CardTitle>
               <CardDescription className="mt-2 text-sm max-w-md">
-                Connect via Personal Access Token to sync your network.
+                Manual capture via the browser extension is the primary path. Official API sync is restricted to approved LinkedIn partner access.
               </CardDescription>
             </div>
             
@@ -683,13 +683,13 @@ export default function Sources() {
               {!linkedinSyncStatus && linkedinSyncOutcome && <span className="text-sm font-medium text-gray-700">{linkedinSyncOutcome}</span>}
               <Dialog open={isLinkedinDialogOpen} onOpenChange={setIsLinkedinDialogOpen}>
                 <DialogTrigger render={<Button variant="outline" />}>
-                  Connect LinkedIn
+                  LinkedIn API (restricted / partner access)
                 </DialogTrigger>
                 <DialogContent>
                   <DialogHeader>
-                    <DialogTitle>Connect LinkedIn</DialogTitle>
+                    <DialogTitle>LinkedIn API (restricted / partner access)</DialogTitle>
                     <DialogDescription>
-                      Enter your LinkedIn handle and your Personal Access Token.
+                      Only use this if you have approved LinkedIn partner API access. Otherwise, use the extension setup for manual capture.
                     </DialogDescription>
                   </DialogHeader>
                   <form onSubmit={handleConnectLinkedin} className="space-y-4 py-4">
@@ -703,7 +703,7 @@ export default function Sources() {
                     </div>
                     <DialogFooter>
                       <Button type="submit" disabled={!!linkedinSyncStatus}>
-                        {linkedinSyncStatus ? 'Syncing...' : 'Connect & Sync'}
+                        {linkedinSyncStatus ? 'Syncing...' : 'Connect restricted API'}
                       </Button>
                     </DialogFooter>
                   </form>
