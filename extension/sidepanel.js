@@ -60,7 +60,7 @@ document.addEventListener('DOMContentLoaded', () => {
           if (hasPermission) {
             extractData(tab.id);
           } else {
-            renderProfileMessage(`Click below to allow access to ${new URL(profileContext.profileUrl).hostname} and capture this profile.`);
+            renderProfileMessage(`Click below to allow access to ${profileContext.hostname} and capture this profile.`);
             captureBtn.textContent = 'Grant Access & Capture';
             captureBtn.disabled = false;
             captureBtn.onclick = () => {

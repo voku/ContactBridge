@@ -26,6 +26,7 @@
   const getProfileContext = (url) => {
     const fallback = {
       handle: '',
+      hostname: '',
       isSupported: false,
       originPattern: null,
       profileUrl: typeof url === 'string' ? url : '',
@@ -46,14 +47,14 @@
     const hostname = parsedUrl.hostname.toLowerCase();
     const pathname = parsedUrl.pathname;
     const profileUrl = parsedUrl.toString();
-    const originPattern = `${parsedUrl.origin}/*`;
 
     if (/(^|\.)linkedin\.com$/.test(hostname) && pathname.startsWith('/in/')) {
       const match = pathname.match(/^\/in\/([^/?#]+)/);
       return {
         handle: match ? decodeURIComponent(match[1]) : '',
+        hostname,
         isSupported: true,
-        originPattern,
+        originPattern: `${parsedUrl.origin}/*`,
         profileUrl,
         source: 'linkedin'
       };
@@ -65,8 +66,9 @@
       if (handle && !X_RESERVED_PATH_SEGMENTS.has(handle.toLowerCase())) {
         return {
           handle,
+          hostname,
           isSupported: true,
-          originPattern,
+          originPattern: `${parsedUrl.origin}/*`,
           profileUrl,
           source: 'x'
         };
@@ -77,8 +79,9 @@
       const match = pathname.match(/^\/profile\/([^/?#]+)/i);
       return {
         handle: match ? decodeURIComponent(match[1]) : '',
+        hostname,
         isSupported: true,
-        originPattern,
+        originPattern: `${parsedUrl.origin}/*`,
         profileUrl,
         source: 'xing'
       };
@@ -88,8 +91,9 @@
       const match = pathname.match(/^\/profile\/([^/?#]+)/);
       return {
         handle: match ? match[1] : '',
+        hostname,
         isSupported: true,
-        originPattern,
+        originPattern: `${parsedUrl.origin}/*`,
         profileUrl,
         source: 'bluesky'
       };

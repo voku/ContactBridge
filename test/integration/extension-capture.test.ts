@@ -15,6 +15,7 @@ const extensionApi = (globalThis as typeof globalThis & {
     };
     getProfileContext: (url: string) => {
       handle: string;
+      hostname: string;
       isSupported: boolean;
       originPattern: string | null;
       profileUrl: string;
@@ -40,6 +41,8 @@ test('getProfileContext only treats real profile URLs as capturable', () => {
   assert.equal(extensionApi.getProfileContext('https://www.linkedin.com/in/jane-demo').source, 'linkedin');
   assert.equal(extensionApi.getProfileContext('https://x.com/jane_demo').source, 'x');
   assert.equal(extensionApi.getProfileContext('https://x.com/home').isSupported, false);
+  assert.equal(extensionApi.getProfileContext('https://x.com/explore').isSupported, false);
+  assert.equal(extensionApi.getProfileContext('https://x.com/messages').isSupported, false);
   assert.equal(extensionApi.getProfileContext('https://bsky.app/profile/jane.test').source, 'bluesky');
   assert.equal(extensionApi.getProfileContext('https://www.xing.com/profile/Jane_Demo').source, 'xing');
   assert.equal(extensionApi.getProfileContext('not-a-url').isSupported, false);
