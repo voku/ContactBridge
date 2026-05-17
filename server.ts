@@ -98,6 +98,13 @@ sqlite.exec(`
     error_code TEXT,
     error_message_safe TEXT
   );
+
+  CREATE TABLE IF NOT EXISTS app_settings (
+    key TEXT PRIMARY KEY,
+    value TEXT NOT NULL,
+    created_at INTEGER,
+    updated_at INTEGER
+  );
 `);
 
 try {
@@ -208,7 +215,6 @@ const requestedAppMode = (process.env.APP_MODE || (process.env.NODE_ENV === 'tes
 const APP_MODE = VALID_APP_MODES.has(requestedAppMode) ? requestedAppMode : 'local';
 const isLocalMode = APP_MODE === 'local' || APP_MODE === 'test';
 const SECRET_ENCRYPTION_VERSION = 1;
-const LOCAL_SECRET_FALLBACK = 'contactbridge-local-development-secret';
 
 const parseOriginList = (value: string | undefined) => (value || '')
   .split(',')
@@ -248,8 +254,20 @@ const getCorsAllowedOrigins = () => {
 const getSecretKeyMaterial = () => {
   const configured = process.env.CONTACTBRIDGE_SECRET_KEY?.trim();
   if (configured) return configured;
-  if (isLocalMode) return LOCAL_SECRET_FALLBACK;
-  throw new Error('CONTACTBRIDGE_SECRET_KEY is required to store or read encrypted source account secrets in hosted mode.');
+  if (!isLocalMode) {
+    throw new Error('CONTACTBRIDGE_SECRET_KEY is required to store or read encrypted source account secrets in hosted mode.');
+  }
+
+  const existingSecret = sqlite.prepare('SELECT value FROM app_settings WHERE key = ?').get('local_secret') as { value?: string } | undefined;
+  if (existingSecret?.value) {
+    return existingSecret.value;
+  }
+
+  const now = Date.now();
+  const generatedSecret = crypto.randomBytes(32).toString('base64');
+  sqlite.prepare('INSERT INTO app_settings (key, value, created_at, updated_at) VALUES (?, ?, ?, ?)')
+    .run('local_secret', generatedSecret, now, now);
+  return generatedSecret;
 };
 
 const getSecretEncryptionKey = () => crypto.createHash('sha256').update(getSecretKeyMaterial()).digest();
@@ -794,7 +812,9 @@ function assignProfileToCandidate(profileIdToUse: string, displayName: string, h
   db.insert(schema.contactCandidates).values({
     id: candidateId,
     canonicalName: displayName || normalizedHandle || 'Unknown',
-    confidenceScore: reviewEvidence[0]?.score || 50,
+    confidenceScore: reviewEvidence.length > 0
+      ? Math.max(...reviewEvidence.map((evidence) => evidence.score))
+      : 50,
     status: 'pending',
     createdAt: now,
     updatedAt: now
@@ -826,7 +846,7 @@ async function startServer() {
       callback(new Error('CORS origin is not allowed by ContactBridge configuration.'));
     }
   }));
-  app.use(express.json({ limit: '1mb' }));
+  app.use(express.json({ limit: '100kb' }));
 
   // --- API ROUTES ---
   app.get("/api/health", (req, res) => {
