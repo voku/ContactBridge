@@ -170,6 +170,57 @@ const normalizeMastodonInstanceUrl = (instance: string) => {
   return instanceUrl.toString().replace(/\/$/, '');
 };
 
+const getLinkedInLocalizedText = (value: any) => {
+  if (!value) {
+    return '';
+  }
+
+  if (typeof value === 'string') {
+    return value;
+  }
+
+  if (value.localized && typeof value.localized === 'object') {
+    const preferredLocaleKey = value.preferredLocale?.language && value.preferredLocale?.country
+      ? `${value.preferredLocale.language}_${value.preferredLocale.country}`
+      : null;
+
+    if (preferredLocaleKey && typeof value.localized[preferredLocaleKey] === 'string') {
+      return value.localized[preferredLocaleKey];
+    }
+
+    const firstLocalizedValue = Object.values(value.localized).find((entry) => typeof entry === 'string');
+    if (typeof firstLocalizedValue === 'string') {
+      return firstLocalizedValue;
+    }
+  }
+
+  return '';
+};
+
+const getLinkedInProfilePictureUrl = (profilePicture: any) => {
+  if (!profilePicture) {
+    return '';
+  }
+
+  if (typeof profilePicture.displayImage === 'string' && /^https?:\/\//.test(profilePicture.displayImage)) {
+    return profilePicture.displayImage;
+  }
+
+  const displayImageElements = profilePicture['displayImage~']?.elements;
+  if (!Array.isArray(displayImageElements)) {
+    return '';
+  }
+
+  for (const element of [...displayImageElements].reverse()) {
+    const identifier = element?.identifiers?.find((entry: any) => typeof entry?.identifier === 'string');
+    if (identifier?.identifier) {
+      return identifier.identifier;
+    }
+  }
+
+  return '';
+};
+
 function assignProfileToCandidate(profileIdToUse: string, displayName: string, handle: string, now: Date) {
   const existingCandidateProfile = db.select().from(schema.contactCandidateProfiles)
     .where(eq(schema.contactCandidateProfiles.socialProfileId, profileIdToUse))
@@ -402,14 +453,17 @@ async function startServer() {
         startedAt: now,
       }).run();
 
-      const demoData = await loadDemoFixture<{ session?: { did?: string }, followers?: any[], follows?: any[] }>('bluesky');
+      const demoData = await loadDemoFixture<{
+        followersResponse?: { followers?: any[] },
+        followsResponse?: { follows?: any[] }
+      }>('bluesky');
       let followersResponse;
       let followsResponse;
 
       if (demoData) {
         stream.progress('Loading demo data...');
-        followersResponse = { data: { followers: demoData.followers || [] } };
-        followsResponse = { data: { follows: demoData.follows || [] } };
+        followersResponse = { data: demoData.followersResponse || { followers: [] } };
+        followsResponse = { data: demoData.followsResponse || { follows: [] } };
       } else {
         stream.progress('Connecting to API...');
         const { BskyAgent } = await import('@atproto/api');
@@ -808,12 +862,15 @@ async function startServer() {
 
       let followers: any[] = [];
       let follows: any[] = [];
-      const demoData = await loadDemoFixture<{ followers?: any[], follows?: any[] }>('x');
+      const demoData = await loadDemoFixture<{
+        followersResponse?: { data?: any[] },
+        followingResponse?: { data?: any[] }
+      }>('x');
 
       if (demoData) {
         stream.progress('Loading demo data...');
-        followers = demoData.followers || [];
-        follows = demoData.follows || [];
+        followers = demoData.followersResponse?.data || [];
+        follows = demoData.followingResponse?.data || [];
       } else {
         stream.progress('Connecting to API...');
         const client = new TwitterApi(accessToken);
@@ -950,7 +1007,9 @@ async function startServer() {
         elements = demoData.elements || [];
       } else {
         stream.progress('Connecting to API...');
-        const connectionsRes = await fetch(`https://api.linkedin.com/v2/connections?q=viewer&start=0&count=100`, {
+        const connectionsRes = await fetch(
+          `https://api.linkedin.com/v2/connections?q=viewer&start=0&count=100&projection=(elements*(to,to~(id,firstName,lastName,headline,profilePicture,publicIdentifier)))`,
+          {
           headers: {
             'Authorization': `Bearer ${token}`,
             'X-Restli-Protocol-Version': '2.0.0'
@@ -983,14 +1042,19 @@ async function startServer() {
 
       stream.progress('Merging duplicates in database...');
       for (const p of elements) {
-        // Map LinkedIn entity fields
-        const sourceProfileId = p.to || p.entityUrn?.replace('urn:li:fs_miniProfile:', '') || p.id || uuidv4();
-        const firstName = p.firstName?.localized?.en_US || p.firstName || '';
-        const lastName = p.lastName?.localized?.en_US || p.lastName || '';
+        const profile = p['to~'] || p;
+        const sourceProfileId =
+          profile.id ||
+          (typeof p.to === 'string' ? p.to.replace(/^urn:li:person:/, '') : null) ||
+          p.entityUrn?.replace('urn:li:fs_miniProfile:', '') ||
+          p.id ||
+          uuidv4();
+        const firstName = getLinkedInLocalizedText(profile.firstName);
+        const lastName = getLinkedInLocalizedText(profile.lastName);
         const displayName = `${firstName} ${lastName}`.trim() || 'LinkedIn User';
-        const avatarUrl = p.profilePicture?.displayImage || '';
-        const profileHandle = p.publicIdentifier || sourceProfileId;
-        const bio = p.headline || '';
+        const avatarUrl = getLinkedInProfilePictureUrl(profile.profilePicture);
+        const profileHandle = profile.publicIdentifier || sourceProfileId;
+        const bio = getLinkedInLocalizedText(profile.headline);
 
         let existingProfile = db.select().from(schema.socialProfiles)
           .where(eq(schema.socialProfiles.sourceProfileId, sourceProfileId))
@@ -1101,14 +1165,17 @@ async function startServer() {
         return results;
       };
 
-      const demoData = await loadDemoFixture<{ followers?: any[], following?: any[] }>('github');
+      const demoData = await loadDemoFixture<{
+        followersResponse?: any[],
+        followingResponse?: any[]
+      }>('github');
       let followers: any[] = [];
       let following: any[] = [];
 
       if (demoData) {
         stream.progress('Loading demo data...');
-        followers = demoData.followers || [];
-        following = demoData.following || [];
+        followers = demoData.followersResponse || [];
+        following = demoData.followingResponse || [];
       } else {
         stream.progress('Connecting to API...');
         const verifyRes = await fetch("https://api.github.com/user", {
@@ -1238,11 +1305,16 @@ async function startServer() {
       }).run();
 
       let allConnections: any[] = [];
-      const demoData = await loadDemoFixture<{ connections?: any[] }>('google');
+      const demoData = await loadDemoFixture<{
+        pages?: Array<{ connections?: any[] }>,
+        connections?: any[]
+      }>('google');
 
       if (demoData) {
         stream.progress('Loading demo data...');
-        allConnections = demoData.connections || [];
+        allConnections = demoData.pages
+          ? demoData.pages.flatMap((page) => page.connections || [])
+          : demoData.connections || [];
       } else {
         const { OAuth2Client } = await import('google-auth-library');
         let authClient: any;

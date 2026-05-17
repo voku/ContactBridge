@@ -1,40 +1,105 @@
 {
   "elements": [
     {
-      "to": "linkedin-1",
-      "firstName": {
-        "localized": {
-          "en_US": "Grace"
-        }
-      },
-      "lastName": {
-        "localized": {
-          "en_US": "Demo"
-        }
-      },
-      "profilePicture": {
-        "displayImage": "https://example.com/grace-demo.jpg"
-      },
-      "publicIdentifier": "grace-demo",
-      "headline": "Product manager"
+      "to": "urn:li:person:linkedin-1",
+      "to~": {
+        "id": "linkedin-1",
+        "firstName": {
+          "localized": {
+            "en_US": "Grace"
+          },
+          "preferredLocale": {
+            "country": "US",
+            "language": "en"
+          }
+        },
+        "lastName": {
+          "localized": {
+            "en_US": "Demo"
+          },
+          "preferredLocale": {
+            "country": "US",
+            "language": "en"
+          }
+        },
+        "headline": {
+          "localized": {
+            "en_US": "Product manager"
+          },
+          "preferredLocale": {
+            "country": "US",
+            "language": "en"
+          }
+        },
+        "profilePicture": {
+          "displayImage": "urn:li:digitalmediaAsset:C5603AQGraceDemo",
+          "displayImage~": {
+            "elements": [
+              {
+                "identifiers": [
+                  {
+                    "identifier": "https://media.licdn.com/dms/image/v2/C5603AQGraceDemo/profile-displayphoto-shrink_200_200/profile-displayphoto-shrink_200_200/0/grace-demo"
+                  }
+                ]
+              }
+            ]
+          }
+        },
+        "publicIdentifier": "grace-demo"
+      }
     },
     {
-      "to": "linkedin-2",
-      "firstName": {
-        "localized": {
-          "en_US": "Heidi"
-        }
-      },
-      "lastName": {
-        "localized": {
-          "en_US": "Demo"
-        }
-      },
-      "profilePicture": {
-        "displayImage": "https://example.com/heidi-demo.jpg"
-      },
-      "publicIdentifier": "heidi-demo",
-      "headline": "Growth lead"
+      "to": "urn:li:person:linkedin-2",
+      "to~": {
+        "id": "linkedin-2",
+        "firstName": {
+          "localized": {
+            "en_US": "Heidi"
+          },
+          "preferredLocale": {
+            "country": "US",
+            "language": "en"
+          }
+        },
+        "lastName": {
+          "localized": {
+            "en_US": "Demo"
+          },
+          "preferredLocale": {
+            "country": "US",
+            "language": "en"
+          }
+        },
+        "headline": {
+          "localized": {
+            "en_US": "Growth lead"
+          },
+          "preferredLocale": {
+            "country": "US",
+            "language": "en"
+          }
+        },
+        "profilePicture": {
+          "displayImage": "urn:li:digitalmediaAsset:C5603AQHeidiDemo",
+          "displayImage~": {
+            "elements": [
+              {
+                "identifiers": [
+                  {
+                    "identifier": "https://media.licdn.com/dms/image/v2/C5603AQHeidiDemo/profile-displayphoto-shrink_200_200/profile-displayphoto-shrink_200_200/0/heidi-demo"
+                  }
+                ]
+              }
+            ]
+          }
+        },
+        "publicIdentifier": "heidi-demo"
+      }
     }
-  ]
+  ],
+  "paging": {
+    "count": 100,
+    "start": 0,
+    "total": 2
+  }
 }

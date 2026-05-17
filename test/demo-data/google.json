@@ -1,61 +1,76 @@
 {
-  "connections": [
+  "pages": [
     {
-      "resourceName": "people/cathy-demo",
-      "names": [
+      "connections": [
         {
-          "displayName": "Cathy Demo"
+          "resourceName": "people/cathy-demo",
+          "etag": "%EgUBAQc=",
+          "names": [
+            {
+              "displayName": "Cathy Demo",
+              "givenName": "Cathy",
+              "familyName": "Demo"
+            }
+          ],
+          "emailAddresses": [
+            {
+              "value": "cathy@example.com"
+            }
+          ],
+          "photos": [
+            {
+              "url": "https://lh3.googleusercontent.com/a-/cathy-demo",
+              "default": false
+            }
+          ],
+          "biographies": [
+            {
+              "value": "Partnerships manager"
+            }
+          ],
+          "urls": [
+            {
+              "value": "https://example.com/cathy"
+            }
+          ]
         }
       ],
-      "emailAddresses": [
-        {
-          "value": "cathy@example.com"
-        }
-      ],
-      "photos": [
-        {
-          "url": "https://example.com/cathy-demo.jpg",
-          "default": false
-        }
-      ],
-      "biographies": [
-        {
-          "value": "Partnerships manager"
-        }
-      ],
-      "urls": [
-        {
-          "value": "https://example.com/cathy"
-        }
-      ]
+      "nextPageToken": "page-2"
     },
     {
-      "resourceName": "people/louis-demo",
-      "names": [
+      "connections": [
         {
-          "displayName": "Louis Demo"
-        }
-      ],
-      "emailAddresses": [
-        {
-          "value": "louis@example.com"
-        }
-      ],
-      "photos": [
-        {
-          "url": "https://example.com/louis-demo.jpg",
-          "default": false
-        }
-      ],
-      "organizations": [
-        {
-          "title": "Engineering Manager",
-          "name": "Example Co"
-        }
-      ],
-      "urls": [
-        {
-          "value": "https://example.com/louis"
+          "resourceName": "people/louis-demo",
+          "etag": "%EgUBAQg=",
+          "names": [
+            {
+              "displayName": "Louis Demo",
+              "givenName": "Louis",
+              "familyName": "Demo"
+            }
+          ],
+          "emailAddresses": [
+            {
+              "value": "louis@example.com"
+            }
+          ],
+          "photos": [
+            {
+              "url": "https://lh3.googleusercontent.com/a-/louis-demo",
+              "default": false
+            }
+          ],
+          "organizations": [
+            {
+              "title": "Engineering Manager",
+              "name": "Example Co"
+            }
+          ],
+          "urls": [
+            {
+              "value": "https://example.com/louis"
+            }
+          ]
         }
       ]
     }

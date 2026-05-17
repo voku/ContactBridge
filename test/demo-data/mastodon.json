@@ -1,24 +1,29 @@
 {
   "selfAccount": {
-    "id": "demo-self"
+    "id": "109876",
+    "username": "contactbridge",
+    "acct": "contactbridge",
+    "display_name": "ContactBridge Demo",
+    "avatar": "https://files.example.social/accounts/avatars/contactbridge/original.png",
+    "note": "<p>ContactBridge test account</p>"
   },
   "followers": [
     {
-      "id": "mastodon-1",
+      "id": "900001",
       "acct": "carol@mastodon.social",
       "display_name": "Carol Demo",
       "username": "carol",
-      "avatar": "https://example.com/carol-demo.jpg",
+      "avatar": "https://files.mastodon.social/accounts/avatars/900001/original.png",
       "note": "<p>Open source maintainer</p>"
     }
   ],
   "following": [
     {
-      "id": "mastodon-2",
+      "id": "900002",
       "acct": "dave@fosstodon.org",
       "display_name": "Dave Demo",
       "username": "dave",
-      "avatar": "https://example.com/dave-demo.jpg",
+      "avatar": "https://media.fosstodon.org/accounts/avatars/900002/original.png",
       "note": "<p>Community builder</p>"
     }
   ]
