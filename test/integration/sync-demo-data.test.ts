@@ -179,6 +179,12 @@ const getJson = async <T>(baseUrl: string, pathname: string): Promise<T> => {
   return response.json() as Promise<T>;
 };
 
+const deleteJson = async <T>(baseUrl: string, pathname: string): Promise<T> => {
+  const response = await fetch(`${baseUrl}${pathname}`, { method: 'DELETE' });
+  assert.equal(response.ok, true, `Expected ${pathname} to succeed`);
+  return response.json() as Promise<T>;
+};
+
 const postSync = async <T>(baseUrl: string, pathname: string, body: Record<string, unknown>): Promise<T> => {
   const response = await fetch(`${baseUrl}${pathname}`, {
     method: 'POST',
@@ -248,3 +254,43 @@ for (const syncCase of syncCases) {
     assert.equal(jobs[0]?.sourceType, syncCase.sourceType);
   });
 }
+
+test('erases all stored demo data', async (t) => {
+  const server = await startServer();
+  t.after(() => stopServer(server));
+
+  const sourceAccount = await postJson<{ id: string }>(server.baseUrl, '/api/source-accounts', {
+    sourceType: 'github',
+    accountIdentifier: 'github-demo-account',
+    displayName: 'github demo',
+    authStatus: 'pending'
+  });
+
+  await postSync<{ success: boolean }>(server.baseUrl, '/api/sync/github', {
+    sourceAccountId: sourceAccount.id,
+    token: 'demo-token'
+  });
+
+  const eraseResult = await deleteJson<{ success: boolean }>(server.baseUrl, '/api/database');
+  assert.equal(eraseResult.success, true);
+
+  const accounts = await getJson<Array<{ id: string }>>(server.baseUrl, '/api/source-accounts');
+  assert.equal(accounts.length, 0);
+
+  const candidates = await getJson<Array<{ id: string }>>(server.baseUrl, '/api/candidates');
+  assert.equal(candidates.length, 0);
+
+  const dashboard = await getJson<{ totalCandidates: number; approvedContacts: number; changedProfiles: number; failedSyncJobs: number }>(
+    server.baseUrl,
+    '/api/dashboard'
+  );
+  assert.deepEqual(dashboard, {
+    totalCandidates: 0,
+    approvedContacts: 0,
+    changedProfiles: 0,
+    failedSyncJobs: 0
+  });
+
+  const jobs = await getJson<Array<{ id: string }>>(server.baseUrl, '/api/dashboard/sync-jobs');
+  assert.equal(jobs.length, 0);
+});

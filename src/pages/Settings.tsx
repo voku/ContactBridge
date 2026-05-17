@@ -1,7 +1,44 @@
+import { useState } from 'react';
 import { Card, CardHeader, CardTitle, CardDescription, CardContent } from '@/components/ui/card';
+import { Button } from '@/components/ui/button';
+import { toast } from 'sonner';
 import { Shield } from 'lucide-react';
+import { apiUrl } from '@/lib/api';
 
 export default function SettingsPage() {
+  const [isErasing, setIsErasing] = useState(false);
+
+  const handleEraseDatabase = async () => {
+    if (isErasing) {
+      return;
+    }
+
+    const confirmed = window.confirm(
+      'Erase all synced candidates, contacts, source accounts, and tokens? This cannot be undone.'
+    );
+
+    if (!confirmed) {
+      return;
+    }
+
+    setIsErasing(true);
+
+    try {
+      const res = await fetch(apiUrl('/api/database'), { method: 'DELETE' });
+      if (!res.ok) {
+        const error = await res.json().catch(() => ({ error: 'Failed to erase database' }));
+        throw new Error(error.error || 'Failed to erase database');
+      }
+
+      toast.success('All ContactBridge data was erased.');
+      window.location.assign(import.meta.env.BASE_URL);
+    } catch (error: any) {
+      toast.error(error.message || 'Failed to erase database');
+    } finally {
+      setIsErasing(false);
+    }
+  };
+
   return (
     <div className="p-8 max-w-3xl mx-auto space-y-8">
       <div>
@@ -37,9 +74,15 @@ export default function SettingsPage() {
               <p className="font-medium text-gray-900">Delete all data</p>
               <p className="text-sm text-gray-500">Permanently erases all synced candidates, contacts, and tokens.</p>
             </div>
-            <button className="px-4 py-2 bg-red-50 text-red-600 hover:bg-red-100 rounded-md text-sm font-medium transition-colors shrink-0">
-              Erase Database
-            </button>
+            <Button
+              type="button"
+              variant="outline"
+              className="shrink-0 border-red-200 bg-red-50 text-red-600 hover:bg-red-100 hover:text-red-700"
+              disabled={isErasing}
+              onClick={handleEraseDatabase}
+            >
+              {isErasing ? 'Erasing…' : 'Erase Database'}
+            </Button>
           </div>
         </CardContent>
       </Card>
