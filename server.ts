@@ -183,6 +183,7 @@ const MANUAL_CAPTURE_SOURCES = new Set(['bluesky', 'linkedin', 'x']);
 const OAUTH_STATE_TTL_MS = 10 * 60 * 1000;
 
 const trimMaybeString = (value: unknown) => typeof value === 'string' ? value.trim() : '';
+const normalizeProfileHandle = (value: unknown) => trimMaybeString(value).replace(/^@+/, '').toLowerCase();
 
 type SourceAccountAuthData = {
   accessToken?: string;
@@ -320,7 +321,7 @@ const getOauthStateEntry = <T extends { createdAt: number }>(store: Map<string, 
 };
 
 const normalizeManualCaptureSourceProfileId = (source: string, handle: string, profileUrl: string | null) => {
-  const normalizedHandle = handle.toLowerCase();
+  const normalizedHandle = normalizeProfileHandle(handle);
   if (normalizedHandle) {
     return normalizedHandle;
   }
@@ -453,6 +454,7 @@ const getLinkedInProfilePictureUrl = (profilePicture: any) => {
 };
 
 function assignProfileToCandidate(profileIdToUse: string, displayName: string, handle: string, now: Date) {
+  const normalizedHandle = normalizeProfileHandle(handle);
   const existingCandidateProfile = db.select().from(schema.contactCandidateProfiles)
     .where(eq(schema.contactCandidateProfiles.socialProfileId, profileIdToUse))
     .get();
@@ -460,9 +462,9 @@ function assignProfileToCandidate(profileIdToUse: string, displayName: string, h
   if (!existingCandidateProfile) {
     let matchedCandidateId = null;
     
-    if (handle) {
+    if (normalizedHandle) {
       const handles = db.select().from(schema.socialProfiles)
-        .where(eq(schema.socialProfiles.handle, handle)).all();
+        .where(eq(schema.socialProfiles.handle, normalizedHandle)).all();
       
       for (const p of handles) {
         if (p.id === profileIdToUse) continue;
@@ -488,14 +490,14 @@ function assignProfileToCandidate(profileIdToUse: string, displayName: string, h
         contactCandidateId: matchedCandidateId,
         socialProfileId: profileIdToUse
       }).run();
-    } else {
-      const candidateId = uuidv4();
-      db.insert(schema.contactCandidates).values({
-        id: candidateId,
-        canonicalName: displayName || handle || 'Unknown',
-        confidenceScore: 50,
-        status: 'pending',
-        createdAt: now,
+      } else {
+        const candidateId = uuidv4();
+        db.insert(schema.contactCandidates).values({
+          id: candidateId,
+          canonicalName: displayName || normalizedHandle || 'Unknown',
+          confidenceScore: 50,
+          status: 'pending',
+          createdAt: now,
         updatedAt: now
       }).run();
 
@@ -1802,7 +1804,7 @@ async function startServer() {
     const source = trimMaybeString(req.body?.source).toLowerCase();
     const displayName = trimMaybeString(req.body?.displayName);
     const headline = trimMaybeString(req.body?.headline);
-    const handle = trimMaybeString(req.body?.handle).replace(/^@+/, '').toLowerCase();
+    const handle = normalizeProfileHandle(req.body?.handle);
     const profileUrl = trimMaybeString(req.body?.profileUrl);
 
     if (!MANUAL_CAPTURE_SOURCES.has(source)) {
