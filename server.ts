@@ -103,6 +103,30 @@ const loadDemoFixture = async <T>(integration: string): Promise<T | null> => {
   }
 };
 
+const createRateLimiter = (windowMs: number, maxRequests: number) => {
+  const requestLog = new Map<string, { count: number, resetAt: number }>();
+
+  return (req: express.Request, res: express.Response, next: express.NextFunction) => {
+    const now = Date.now();
+    const clientKey = req.ip || req.socket.remoteAddress || 'unknown';
+    const currentEntry = requestLog.get(clientKey);
+
+    if (!currentEntry || currentEntry.resetAt <= now) {
+      requestLog.set(clientKey, { count: 1, resetAt: now + windowMs });
+      next();
+      return;
+    }
+
+    if (currentEntry.count >= maxRequests) {
+      res.status(429).json({ error: 'Too many requests. Please try again later.' });
+      return;
+    }
+
+    currentEntry.count += 1;
+    next();
+  };
+};
+
 const normalizeMastodonInstanceUrl = (instance: string) => {
   const candidate = instance.startsWith('http://') || instance.startsWith('https://')
     ? instance
@@ -119,12 +143,14 @@ const normalizeMastodonInstanceUrl = (instance: string) => {
   }
 
   if (net.isIP(hostname)) {
+    const isUniqueLocalIpv6 = /^(fc|fd)[0-9a-f]{2}:/i.test(hostname);
+    const isLinkLocalIpv6 = /^fe[89ab][0-9a-f]:/i.test(hostname);
+
     if (
       hostname === '::1' ||
       hostname === '::' ||
-      hostname.startsWith('fc') ||
-      hostname.startsWith('fd') ||
-      hostname.startsWith('fe80:') ||
+      isUniqueLocalIpv6 ||
+      isLinkLocalIpv6 ||
       /^10\./.test(hostname) ||
       /^127\./.test(hostname) ||
       /^169\.254\./.test(hostname) ||
@@ -200,9 +226,20 @@ function assignProfileToCandidate(profileIdToUse: string, displayName: string, h
 async function startServer() {
   const app = express();
   const PORT = Number(process.env.PORT || 3000);
+  const syncRateLimiter = createRateLimiter(60_000, 10);
 
   app.use(cors());
   app.use(express.json());
+  app.use([
+    '/api/auth/x/url',
+    '/api/auth/google/url',
+    '/api/sync/bluesky',
+    '/api/sync/mastodon',
+    '/api/sync/x',
+    '/api/sync/linkedin',
+    '/api/sync/github',
+    '/api/sync/google'
+  ], syncRateLimiter);
 
   // --- API ROUTES ---
   app.get("/api/health", (req, res) => {

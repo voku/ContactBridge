@@ -231,6 +231,7 @@ for (const syncCase of syncCases) {
     assert.equal(dashboard.failedSyncJobs, 0);
 
     const jobs = await getJson<Array<{ status: string; sourceType: string }>>(server.baseUrl, '/api/dashboard/sync-jobs');
+    assert.ok(jobs.length > 0);
     assert.equal(jobs[0]?.status, 'completed');
     assert.equal(jobs[0]?.sourceType, syncCase.sourceType);
   });
