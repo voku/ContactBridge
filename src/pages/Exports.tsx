@@ -2,6 +2,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Button } from '@/components/ui/button';
 import { Download } from 'lucide-react';
 import { toast } from 'sonner';
+import { apiUrl } from '@/lib/api';
 
 const getProfileUrl = (p: any) => {
   if (p.profileUrl) return p.profileUrl;
@@ -23,7 +24,7 @@ const getProfileUrl = (p: any) => {
 export default function Exports() {
   const handleExport = async (format: string) => {
     try {
-      const res = await fetch('/api/candidates');
+      const res = await fetch(apiUrl('/api/candidates'));
       const data = await res.json();
       const approved = data.filter((c: any) => c.status === 'approved');
       

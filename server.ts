@@ -1,6 +1,7 @@
 import express from "express";
 import path from "path";
 import cors from "cors";
+import dotenv from "dotenv";
 import { createServer as createViteServer } from "vite";
 import Database from 'better-sqlite3';
 import { drizzle } from 'drizzle-orm/better-sqlite3';
@@ -8,6 +9,9 @@ import { v4 as uuidv4 } from "uuid";
 import * as schema from "./src/lib/db/schema.js";
 import { eq, desc } from "drizzle-orm";
 import { TwitterApi } from "twitter-api-v2";
+
+dotenv.config({ path: '.env.local', override: true });
+dotenv.config();
 
 const sqlite = new Database('sqlite.db');
 
@@ -1156,9 +1160,9 @@ async function startServer() {
 
         const socialProfileId = uuidv4();
         
-        const existingProfile = db.query.socialProfiles.findFirst({
-          where: eq(schema.socialProfiles.sourceProfileId, sourceProfileId)
-        });
+        const existingProfile = db.select().from(schema.socialProfiles)
+          .where(eq(schema.socialProfiles.sourceProfileId, sourceProfileId))
+          .get();
 
         let profileIdToUse = existingProfile?.id;
 

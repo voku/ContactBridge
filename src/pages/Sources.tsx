@@ -6,6 +6,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger, DialogFooter } from '@/components/ui/dialog';
 import { toast } from 'sonner';
+import { apiUrl, getAllowedPopupOrigins } from '@/lib/api';
 import { runSyncTask } from '@/lib/syncUtils';
 
 const parseSyncError = (platform: string, rawError: string) => {
@@ -132,7 +133,7 @@ export default function Sources() {
 
   const fetchAccounts = async () => {
     try {
-      const res = await fetch('/api/source-accounts');
+      const res = await fetch(apiUrl('/api/source-accounts'));
       const data = await res.json();
       setAccounts(data);
     } catch (e) {
@@ -142,7 +143,7 @@ export default function Sources() {
 
   const handleDisconnect = async (id: string) => {
     try {
-      const res = await fetch(`/api/source-accounts/${id}`, {
+      const res = await fetch(apiUrl(`/api/source-accounts/${id}`), {
         method: 'DELETE'
       });
       if (res.ok) {
@@ -164,7 +165,7 @@ export default function Sources() {
     setBskySyncOutcome('');
     try {
       // 1. Create source account
-      const accRes = await fetch('/api/source-accounts', {
+      const accRes = await fetch(apiUrl('/api/source-accounts'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -204,7 +205,7 @@ export default function Sources() {
   const handleConnectX = async (e: React.FormEvent) => {
     e.preventDefault();
     try {
-      const response = await fetch('/api/auth/x/url', {
+      const response = await fetch(apiUrl('/api/auth/x/url'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ clientId: xClientId, clientSecret: xClientSecret })
@@ -226,8 +227,8 @@ export default function Sources() {
 
   useEffect(() => {
     const handleMessage = async (event: MessageEvent) => {
-      const origin = event.origin;
-      if (!origin.endsWith('.run.app') && !origin.includes('localhost')) {
+      const allowedOrigins = getAllowedPopupOrigins();
+      if (!allowedOrigins.has(event.origin)) {
         return;
       }
       if (event.data?.type === 'OAUTH_AUTH_SUCCESS_GOOGLE') {
@@ -236,7 +237,7 @@ export default function Sources() {
         setGoogleSyncOutcome('');
         
         try {
-          const accRes = await fetch('/api/source-accounts', {
+          const accRes = await fetch(apiUrl('/api/source-accounts'), {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
@@ -277,7 +278,7 @@ export default function Sources() {
         setXSyncOutcome('');
         
         try {
-          const accRes = await fetch('/api/source-accounts', {
+          const accRes = await fetch(apiUrl('/api/source-accounts'), {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
@@ -319,7 +320,7 @@ export default function Sources() {
     setIsLinkedinDialogOpen(false);
     setLinkedinSyncOutcome('');
     try {
-      const accRes = await fetch('/api/source-accounts', {
+      const accRes = await fetch(apiUrl('/api/source-accounts'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -375,7 +376,7 @@ export default function Sources() {
     setMastodonSyncOutcome('');
     try {
       // 1. Create source account
-      const accRes = await fetch('/api/source-accounts', {
+      const accRes = await fetch(apiUrl('/api/source-accounts'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -418,7 +419,7 @@ export default function Sources() {
     setGithubSyncOutcome('');
     try {
       // 1. Create source account
-      const accRes = await fetch('/api/source-accounts', {
+      const accRes = await fetch(apiUrl('/api/source-accounts'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -456,7 +457,7 @@ export default function Sources() {
   const handleConnectGoogle = async (e: React.FormEvent) => {
     e.preventDefault();
     try {
-      const response = await fetch('/api/auth/google/url', {
+      const response = await fetch(apiUrl('/api/auth/google/url'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ clientId: googleClientId, clientSecret: googleClientSecret })

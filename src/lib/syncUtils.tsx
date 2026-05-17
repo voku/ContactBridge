@@ -1,6 +1,7 @@
 import React from 'react';
 import { ExternalLink } from 'lucide-react';
 import { toast } from 'sonner';
+import { apiUrl } from '@/lib/api';
 
 /**
  * Performs a sync request handling Server-Sent Events (NDJSON stream)
@@ -14,7 +15,7 @@ import { toast } from 'sonner';
 export const runSyncTask = async (endpoint: string, body: any, setStatus: (s: string) => void) => {
   setStatus('Connecting to API...');
   
-  const res = await fetch(endpoint, {
+  const res = await fetch(apiUrl(endpoint), {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(body)
@@ -63,4 +64,3 @@ export const runSyncTask = async (endpoint: string, body: any, setStatus: (s: st
 
   return result || { success: true };
 };
-

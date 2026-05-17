@@ -3,6 +3,7 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/com
 import { Users, AlertCircle, CheckCircle2, UserPlus, Clock, XCircle } from 'lucide-react';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Cell } from 'recharts';
 import { format, differenceInSeconds } from 'date-fns';
+import { apiUrl } from '@/lib/api';
 
 interface SyncJob {
   id: string;
@@ -19,12 +20,12 @@ export default function Dashboard() {
   const [syncJobs, setSyncJobs] = useState<SyncJob[]>([]);
 
   useEffect(() => {
-    fetch('/api/dashboard')
+    fetch(apiUrl('/api/dashboard'))
       .then(r => r.json())
       .then(setStats)
       .catch(console.error);
 
-    fetch('/api/dashboard/sync-jobs')
+    fetch(apiUrl('/api/dashboard/sync-jobs'))
       .then(r => r.json())
       .then(setSyncJobs)
       .catch(console.error);

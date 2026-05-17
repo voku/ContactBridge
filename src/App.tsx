@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import { BrowserRouter as Router, Routes, Route, Link, useLocation } from 'react-router';
+import { BrowserRouter, HashRouter, Routes, Route, Link, useLocation } from 'react-router';
 import { Users, Database, CheckSquare, Download, Settings, Cloud } from 'lucide-react';
 import { Toaster } from '@/components/ui/sonner';
 
@@ -62,6 +62,8 @@ function Sidebar() {
 }
 
 export default function App() {
+  const Router = import.meta.env.BASE_URL === '/' ? BrowserRouter : HashRouter;
+
   return (
     <Router>
       <div className="flex min-h-screen bg-white">
