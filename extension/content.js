@@ -21,6 +21,20 @@ function extractProfile() {
       const descEl = document.querySelector('[data-testid="UserDescription"]');
       headline = descEl ? descEl.innerText : '';
     }
+  } else if (url.includes('xing.com/profile/')) {
+    source = 'xing';
+    const matches = url.match(/xing\.com\/profile\/([^/?#]+)/i);
+    handle = matches ? decodeURIComponent(matches[1]) : '';
+    const title = document.title.split('|')[0]?.trim() || '';
+    displayName =
+      document.querySelector('h1')?.innerText ||
+      document.querySelector('[data-qa="profile-top-card-full-name"]')?.innerText ||
+      title ||
+      handle;
+    headline =
+      document.querySelector('[data-qa="profile-top-card-headline"]')?.innerText ||
+      document.querySelector('main h2')?.innerText ||
+      '';
   } else if (url.includes('bsky.app/profile/')) {
     source = 'bluesky';
     const matches = url.match(/bsky\.app\/profile\/([^\/]+)/);

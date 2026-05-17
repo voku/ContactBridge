@@ -94,6 +94,45 @@ const showErrorToast = (platform: string, rawError: string) => {
   });
 };
 
+const ExtensionSetupDialog = ({ triggerLabel = 'Extension Setup' }: { triggerLabel?: string }) => (
+  <Dialog>
+    <DialogTrigger render={<Button variant="secondary" />}>
+      {triggerLabel}
+    </DialogTrigger>
+    <DialogContent>
+      <DialogHeader>
+        <DialogTitle>Extension Setup</DialogTitle>
+        <DialogDescription>
+          To capture profiles manually from supported networks (LinkedIn, X, Bluesky, and XING), follow these instructions:
+        </DialogDescription>
+      </DialogHeader>
+      <div className="space-y-4 py-4 text-sm text-gray-700">
+        <ol className="list-decimal pl-5 space-y-3">
+          <li>Download the <code>extension</code> folder included in this source code.</li>
+          <li>Open Chrome and navigate to <strong>chrome://extensions</strong></li>
+          <li>Enable <strong>Developer mode</strong> in the top right.</li>
+          <li>Click <strong>Load unpacked</strong> and select the <code>extension</code> folder.</li>
+          <li>Click the extension icon in Chrome to open the Side Panel.</li>
+          <li>Enter the following Hub URL when prompted:</li>
+        </ol>
+        <div className="bg-gray-100 p-3 rounded-md flex items-center justify-between">
+          <code className="text-blue-600 font-mono text-xs">{window.location.origin}</code>
+          <Button size="sm" variant="outline" onClick={() => {
+            navigator.clipboard.writeText(window.location.origin);
+            toast.success('URL copied');
+          }}>Copy</Button>
+        </div>
+        <p className="text-xs text-gray-500 mt-2">
+          The extension uses Optional Permissions. You only grant it access to the specific sites you want to capture from.
+        </p>
+      </div>
+      <DialogFooter>
+        <Button type="button" variant="outline" onClick={() => document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }))}>Done</Button>
+      </DialogFooter>
+    </DialogContent>
+  </Dialog>
+);
+
 export default function Sources() {
   const [accounts, setAccounts] = useState<any[]>([]);
   const [bskyId, setBskyId] = useState('');
@@ -670,44 +709,25 @@ export default function Sources() {
                   </form>
                 </DialogContent>
               </Dialog>
-              <Dialog>
-                <DialogTrigger render={<Button variant="secondary" />}>
-                  Extension Setup
-                </DialogTrigger>
-              <DialogContent>
-                <DialogHeader>
-                  <DialogTitle>Extension Setup</DialogTitle>
-                  <DialogDescription>
-                    To capture profiles manually from supported networks (like LinkedIn and X), follow these instructions:
-                  </DialogDescription>
-                </DialogHeader>
-                <div className="space-y-4 py-4 text-sm text-gray-700">
-                  <ol className="list-decimal pl-5 space-y-3">
-                    <li>Download the <code>extension</code> folder included in this source code.</li>
-                    <li>Open Chrome and navigate to <strong>chrome://extensions</strong></li>
-                    <li>Enable <strong>Developer mode</strong> in the top right.</li>
-                    <li>Click <strong>Load unpacked</strong> and select the <code>extension</code> folder.</li>
-                    <li>Click the extension icon in Chrome to open the Side Panel.</li>
-                    <li>Enter the following Hub URL when prompted:</li>
-                  </ol>
-                  <div className="bg-gray-100 p-3 rounded-md flex items-center justify-between">
-                    <code className="text-blue-600 font-mono text-xs">{window.location.origin}</code>
-                    <Button size="sm" variant="outline" onClick={() => {
-                      navigator.clipboard.writeText(window.location.origin);
-                      toast.success('URL copied');
-                    }}>Copy</Button>
-                  </div>
-                  <p className="text-xs text-gray-500 mt-2">
-                    The extension uses Optional Permissions. You only grant it access to the specific sites you want to capture from.
-                  </p>
-                </div>
-                <DialogFooter>
-                  <Button type="button" variant="outline" onClick={() => document.dispatchEvent(new KeyboardEvent('keydown', {key: 'Escape'}))}>Done</Button>
-                </DialogFooter>
-              </DialogContent>
-            </Dialog>
+              <ExtensionSetupDialog />
             </div>
             
+          </div>
+        </Card>
+
+        {/* XING */}
+        <Card>
+          <div className="flex flex-col sm:flex-row p-6 gap-6 items-start sm:items-center justify-between">
+            <div>
+              <CardTitle className="text-lg">XING</CardTitle>
+              <CardDescription className="mt-2 text-sm max-w-md">
+                Manual capture via the browser extension. XING does not expose a public contacts or network API that ContactBridge can sync directly.
+              </CardDescription>
+            </div>
+
+            <div className="flex items-center gap-3">
+              <ExtensionSetupDialog triggerLabel="Open Extension Setup" />
+            </div>
           </div>
         </Card>
 

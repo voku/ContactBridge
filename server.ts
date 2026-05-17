@@ -179,7 +179,7 @@ const normalizeMastodonInstanceUrl = (instance: string) => {
   return instanceUrl.toString().replace(/\/$/, '');
 };
 
-const MANUAL_CAPTURE_SOURCES = new Set(['bluesky', 'linkedin', 'x']);
+const MANUAL_CAPTURE_SOURCES = new Set(['bluesky', 'linkedin', 'x', 'xing']);
 const OAUTH_STATE_TTL_MS = 10 * 60 * 1000;
 
 const trimMaybeString = (value: unknown) => typeof value === 'string' ? value.trim() : '';
@@ -356,6 +356,10 @@ const normalizeManualCaptureSourceProfileId = (source: string, handle: string, p
 
   if (source === 'x' && pathSegments[0]) {
     return pathSegments[0].toLowerCase();
+  }
+
+  if (source === 'xing' && pathSegments[0] === 'profile' && pathSegments[1]) {
+    return decodeURIComponent(pathSegments[1]).toLowerCase();
   }
 
   return profileUrl.toLowerCase();

@@ -39,7 +39,7 @@ document.addEventListener('DOMContentLoaded', () => {
       const tab = tabs[0];
       const url = tab.url || '';
       
-      if (url.includes('linkedin.com/in/') || url.includes('x.com/') || url.includes('twitter.com/') || url.includes('bsky.app/profile/')) {
+      if (url.includes('linkedin.com/in/') || url.includes('x.com/') || url.includes('twitter.com/') || url.includes('bsky.app/profile/') || url.includes('xing.com/profile/')) {
         const origin = new URL(url).origin + '/*';
         
         chrome.permissions.contains({ origins: [origin] }, (hasPermission) => {
@@ -60,7 +60,7 @@ document.addEventListener('DOMContentLoaded', () => {
           }
         });
       } else {
-        profileDataDiv.innerHTML = '<p class="muted">Navigate to a supported profile (LinkedIn, X, Bluesky) to capture.</p>';
+        profileDataDiv.innerHTML = '<p class="muted">Navigate to a supported profile (LinkedIn, X, Bluesky, XING) to capture.</p>';
         captureBtn.disabled = true;
       }
     });
