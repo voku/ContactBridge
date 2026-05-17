@@ -303,9 +303,10 @@ async function startServer() {
       })();
 
       res.json({ success: true });
-    } catch (e: any) {
+    } catch (e: unknown) {
+      const errorMessage = e instanceof Error ? e.message : "Failed to erase database";
       console.error("Failed to erase database:", e);
-      res.status(500).json({ error: e.message });
+      res.status(500).json({ error: errorMessage });
     }
   });
 

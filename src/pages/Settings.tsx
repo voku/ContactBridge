@@ -8,6 +8,14 @@ import { apiUrl } from '@/lib/api';
 export default function SettingsPage() {
   const [isErasing, setIsErasing] = useState(false);
 
+  const getErrorMessage = (error: unknown) => {
+    if (error instanceof Error && error.message) {
+      return error.message;
+    }
+
+    return 'Unexpected error while erasing database';
+  };
+
   const handleEraseDatabase = async () => {
     if (isErasing) {
       return;
@@ -32,8 +40,8 @@ export default function SettingsPage() {
 
       toast.success('All ContactBridge data was erased.');
       window.location.assign(import.meta.env.BASE_URL);
-    } catch (error: any) {
-      toast.error(error.message || 'Failed to erase database');
+    } catch (error: unknown) {
+      toast.error(getErrorMessage(error));
     } finally {
       setIsErasing(false);
     }
