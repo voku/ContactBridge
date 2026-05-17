@@ -1,0 +1,8 @@
+{
+  "name": "ContactBridge",
+  "description": "Privacy-first social contact hub. Builds a clean address book from your social graph on Bluesky, Mastodon, X, and LinkedIn.",
+  "requestFramePermissions": [],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}

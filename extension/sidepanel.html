@@ -1,0 +1,42 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>ContactBridge Capture</title>
+  <style>
+    body { font-family: system-ui, sans-serif; padding: 16px; margin: 0; background: #f9fafb; color: #111827; }
+    h1 { font-size: 1.125rem; font-weight: 600; margin-top: 0; margin-bottom: 16px; }
+    .card { background: white; border-radius: 8px; padding: 16px; box-shadow: 0 1px 3px rgba(0,0,0,0.1); margin-bottom: 16px; }
+    label { display: block; font-size: 0.875rem; font-weight: 500; margin-bottom: 4px; color: #374151; }
+    input { width: 100%; box-sizing: border-box; padding: 8px; border: 1px solid #d1d5db; border-radius: 6px; margin-bottom: 12px; font-size: 0.875rem; }
+    button { background: #2563eb; color: white; border: none; padding: 8px 16px; border-radius: 6px; font-weight: 500; cursor: pointer; width: 100%; transition: background 0.2s; }
+    button:hover { background: #1d4ed8; }
+    button:disabled { background: #9ca3af; cursor: not-allowed; }
+    #status { margin-top: 12px; font-size: 0.875rem; color: #059669; display: none; text-align: center; font-weight: 500; }
+    .error { color: #dc2626 !important; }
+    .muted { color: #6b7280; font-size: 0.875rem; line-height: 1.4; }
+    .data-row { margin-bottom: 8px; }
+    .data-label { font-size: 0.75rem; color: #6b7280; text-transform: uppercase; letter-spacing: 0.05em; font-weight: 600; }
+    .data-value { font-size: 0.875rem; font-weight: 500; }
+  </style>
+</head>
+<body>
+  <h1>ContactBridge</h1>
+  
+  <div class="card">
+    <label for="apiUrl">Hub URL</label>
+    <input type="url" id="apiUrl" placeholder="https://..." />
+    <button id="saveConfigBtn">Save URL</button>
+  </div>
+
+  <div class="card" id="captureSection" style="opacity: 0.5; pointer-events: none;">
+    <div id="profileData" style="margin-bottom: 16px;">
+      <p class="muted">Navigate to a supported profile (LinkedIn, X, Bluesky) to capture.</p>
+    </div>
+    <button id="captureBtn" disabled>Save this profile</button>
+    <div id="status"></div>
+  </div>
+
+  <script src="sidepanel.js"></script>
+</body>
+</html>

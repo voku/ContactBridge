@@ -1,0 +1,27 @@
+{
+  "manifest_version": 3,
+  "name": "ContactBridge Capture",
+  "version": "0.1.0",
+  "description": "Optional capture helper for ContactBridge. Maps public profiles via manual review.",
+  "permissions": [
+    "sidePanel",
+    "activeTab",
+    "storage",
+    "scripting"
+  ],
+  "optional_host_permissions": [
+    "*://*.linkedin.com/*",
+    "*://*.x.com/*",
+    "*://*.twitter.com/*",
+    "*://bsky.app/*"
+  ],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "action": {
+    "default_title": "Open ContactBridge Capture"
+  },
+  "side_panel": {
+    "default_path": "sidepanel.html"
+  }
+}
