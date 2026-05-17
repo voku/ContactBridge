@@ -11,6 +11,39 @@ import { Search, Github, Twitter, Linkedin, Link2, Hash, CheckSquare, Trash2, Do
 import { toast } from 'sonner';
 import { apiUrl } from '@/lib/api';
 
+type RelationshipSummary = {
+  relationTypes: string[];
+  profilesWithRelationships: number;
+  mutualProfileCount: number;
+  followsCount: number;
+  followedByCount: number;
+  connectionCount: number;
+  contactCount: number;
+};
+
+type ContactProfile = {
+  id: string;
+  sourceType: string;
+  handle: string | null;
+  displayName: string | null;
+  profileUrl: string | null;
+  avatarUrl: string | null;
+  bio: string | null;
+  rawPublicPayloadJson: string | null;
+  relations: string[];
+};
+
+type ContactCandidate = {
+  id: string;
+  canonicalName: string | null;
+  status: string;
+  notes: string | null;
+  profiles: ContactProfile[];
+  relationshipSummary: RelationshipSummary;
+};
+
+type ContactFilterKey = 'all' | 'mutual' | 'followedBy' | 'follows' | 'connection' | 'contact' | 'manual';
+
 const getSourceIcon = (sourceType: string) => {
   switch (sourceType?.toLowerCase()) {
     case 'github': return <Github className="w-3.5 h-3.5" />;
@@ -23,7 +56,7 @@ const getSourceIcon = (sourceType: string) => {
   }
 };
 
-const getProfileUrl = (p: any) => {
+const getProfileUrl = (p: ContactProfile) => {
   if (p.profileUrl) return p.profileUrl;
   try {
     const raw = p.rawPublicPayloadJson ? JSON.parse(p.rawPublicPayloadJson) : {};
@@ -41,13 +74,104 @@ const getProfileUrl = (p: any) => {
   }
 };
 
+const CONTACT_FILTER_LABELS: Record<ContactFilterKey, string> = {
+  all: 'All',
+  mutual: 'Mutuals',
+  followedBy: 'Follow you',
+  follows: 'You follow',
+  connection: 'LinkedIn',
+  contact: 'Address book',
+  manual: 'Manual',
+};
+
+const matchesContactFilter = (contact: ContactCandidate, filter: ContactFilterKey) => {
+  const summary = contact.relationshipSummary;
+  switch (filter) {
+    case 'all':
+      return true;
+    case 'mutual':
+      return summary.mutualProfileCount > 0;
+    case 'followedBy':
+      return summary.followedByCount > summary.mutualProfileCount;
+    case 'follows':
+      return summary.followsCount > summary.mutualProfileCount;
+    case 'connection':
+      return summary.connectionCount > 0;
+    case 'contact':
+      return summary.contactCount > 0;
+    case 'manual':
+      return summary.profilesWithRelationships === 0;
+  }
+};
+
+const getContactPriority = (contact: ContactCandidate) => {
+  const summary = contact.relationshipSummary;
+  if (summary.mutualProfileCount > 0) return 0;
+  if (summary.followedByCount > summary.mutualProfileCount) return 1;
+  if (summary.connectionCount > 0 || summary.contactCount > 0) return 2;
+  if (summary.followsCount > summary.mutualProfileCount) return 3;
+  return 4;
+};
+
+const getRelationshipBadges = (contact: ContactCandidate) => {
+  const summary = contact.relationshipSummary;
+  const badges: Array<{ label: string; className: string }> = [];
+
+  if (summary.mutualProfileCount > 0) {
+    badges.push({
+      label: summary.mutualProfileCount > 1 ? `Mutual ×${summary.mutualProfileCount}` : 'Mutual',
+      className: 'bg-emerald-50 text-emerald-700 border border-emerald-200',
+    });
+  }
+
+  const followedByOnlyCount = summary.followedByCount - summary.mutualProfileCount;
+  if (followedByOnlyCount > 0) {
+    badges.push({
+      label: followedByOnlyCount > 1 ? `Follow you ×${followedByOnlyCount}` : 'Follows you',
+      className: 'bg-sky-50 text-sky-700 border border-sky-200',
+    });
+  }
+
+  const followsOnlyCount = summary.followsCount - summary.mutualProfileCount;
+  if (followsOnlyCount > 0) {
+    badges.push({
+      label: followsOnlyCount > 1 ? `You follow ×${followsOnlyCount}` : 'You follow',
+      className: 'bg-violet-50 text-violet-700 border border-violet-200',
+    });
+  }
+
+  if (summary.connectionCount > 0) {
+    badges.push({
+      label: summary.connectionCount > 1 ? `LinkedIn ×${summary.connectionCount}` : 'LinkedIn connection',
+      className: 'bg-blue-50 text-blue-700 border border-blue-200',
+    });
+  }
+
+  if (summary.contactCount > 0) {
+    badges.push({
+      label: summary.contactCount > 1 ? `Contacts ×${summary.contactCount}` : 'Address book',
+      className: 'bg-amber-50 text-amber-700 border border-amber-200',
+    });
+  }
+
+  if (badges.length === 0) {
+    badges.push({
+      label: 'Manual capture',
+      className: 'bg-slate-100 text-slate-700 border border-slate-200',
+    });
+  }
+
+  return badges;
+};
+
 export default function Contacts() {
-  const [contacts, setContacts] = useState<any[]>([]);
+  const [contacts, setContacts] = useState<ContactCandidate[]>([]);
   const [searchQuery, setSearchQuery] = useState('');
+  const [activeFilter, setActiveFilter] = useState<ContactFilterKey>('all');
   const [isSelectionMode, setIsSelectionMode] = useState(false);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   
-  const [selectedContact, setSelectedContact] = useState<any | null>(null);
+  const [selectedContact, setSelectedContact] = useState<ContactCandidate | null>(null);
   const [notesDraft, setNotesDraft] = useState('');
   const [isSavingNotes, setIsSavingNotes] = useState(false);
 
@@ -58,8 +182,8 @@ export default function Contacts() {
   const fetchContacts = async () => {
     try {
       const res = await fetch(apiUrl('/api/candidates'));
-      const data = await res.json();
-      setContacts(data.filter((c: any) => c.status === 'approved'));
+      const data = await res.json() as ContactCandidate[];
+      setContacts(data.filter((c) => c.status === 'approved'));
     } catch (e) {
       console.error(e);
       toast.error('Failed to load contacts');
@@ -91,8 +215,25 @@ export default function Contacts() {
     if (!searchQuery) return true;
     const query = searchQuery.toLowerCase();
     const nameMatch = c.canonicalName?.toLowerCase().includes(query);
-    const handleMatch = c.profiles?.some((p: any) => p.handle?.toLowerCase().includes(query));
+    const handleMatch = c.profiles.some((p) => p.handle?.toLowerCase().includes(query));
     return nameMatch || handleMatch;
+  }).filter((contact) => matchesContactFilter(contact, activeFilter))
+    .sort((left, right) => (
+      getContactPriority(left) - getContactPriority(right)
+      || (left.canonicalName || '').localeCompare(right.canonicalName || '')
+    ));
+
+  const filterCounts = (Object.keys(CONTACT_FILTER_LABELS) as ContactFilterKey[]).reduce<Record<ContactFilterKey, number>>((counts, key) => {
+    counts[key] = contacts.filter((contact) => matchesContactFilter(contact, key)).length;
+    return counts;
+  }, {
+    all: 0,
+    mutual: 0,
+    followedBy: 0,
+    follows: 0,
+    connection: 0,
+    contact: 0,
+    manual: 0,
   });
 
   const toggleSelect = (id: string, checked: boolean) => {
@@ -212,14 +353,38 @@ export default function Contacts() {
         </div>
       )}
 
-      <div className="relative">
-        <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" />
-        <Input 
-          className="pl-9 bg-white" 
-          placeholder="Search by name or handle..." 
-          value={searchQuery}
-          onChange={(e) => setSearchQuery(e.target.value)}
-        />
+      <div className="space-y-4">
+        <div className="relative">
+          <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" />
+          <Input 
+            className="pl-9 bg-white" 
+            placeholder="Search by name or handle..." 
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+          />
+        </div>
+
+        {contacts.length > 0 && (
+          <div className="flex flex-wrap gap-2">
+            {(Object.keys(CONTACT_FILTER_LABELS) as ContactFilterKey[]).map((filterKey) => (
+              <Button
+                key={filterKey}
+                size="sm"
+                variant={activeFilter === filterKey ? 'default' : 'outline'}
+                onClick={() => setActiveFilter(filterKey)}
+                className="h-8"
+              >
+                {CONTACT_FILTER_LABELS[filterKey]} ({filterCounts[filterKey]})
+              </Button>
+            ))}
+          </div>
+        )}
+
+        {contacts.length > 0 && (
+          <p className="text-sm text-gray-500">
+            Prioritize people who already follow you, spot mutuals quickly, and keep manual captures separate until they are fully reviewed.
+          </p>
+        )}
       </div>
 
       {contacts.length === 0 ? (
@@ -232,7 +397,7 @@ export default function Contacts() {
         </div>
       ) : (
         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-          {filteredContacts.map((c: any) => (
+          {filteredContacts.map((c) => (
             <Card 
               key={c.id} 
               className={`overflow-hidden transition-all ${isSelectionMode ? 'cursor-pointer hover:border-indigo-300' : 'cursor-pointer hover:shadow-md'} ${selectedIds.has(c.id) ? 'ring-2 ring-indigo-500 bg-indigo-50/10' : ''}`}
@@ -261,8 +426,15 @@ export default function Contacts() {
                 </Avatar>
                 <div>
                   <h3 className="font-semibold text-gray-900 text-lg">{c.canonicalName}</h3>
+                  <div className="flex flex-wrap items-center justify-center gap-2 mt-3">
+                    {getRelationshipBadges(c).map((badge) => (
+                      <span key={badge.label} className={`inline-flex items-center rounded-full px-2.5 py-1 text-xs font-medium ${badge.className}`}>
+                        {badge.label}
+                      </span>
+                    ))}
+                  </div>
                   <div className="flex flex-col items-center gap-2 mt-3 cursor-default" onClick={e => e.stopPropagation()}>
-                    {c.profiles.map((p: any) => {
+                    {c.profiles.map((p) => {
                       const url = getProfileUrl(p);
                       return (
                         <a 
@@ -280,11 +452,11 @@ export default function Contacts() {
                   </div>
                 </div>
                 {(() => {
-                  const bio = c.profiles.find((p: any) => p.bio)?.bio;
-                  if (!bio) return null;
-                  return (
-                    <p className="text-sm text-gray-500 line-clamp-3 text-ellipsis overflow-hidden mt-4 px-2" title={bio}>
-                      {bio}
+                   const bio = c.profiles.find((p) => p.bio)?.bio;
+                   if (!bio) return null;
+                   return (
+                     <p className="text-sm text-gray-500 line-clamp-3 text-ellipsis overflow-hidden mt-4 px-2" title={bio}>
+                       {bio}
                     </p>
                   );
                 })()}

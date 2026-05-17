@@ -273,6 +273,84 @@ const appendUniqueRelation = (relations: readonly string[] = [], relation: strin
   Array.from(new Set([...relations, relation]))
 );
 
+type CandidateProfileWithRelations = typeof schema.socialProfiles.$inferSelect & {
+  relations: string[];
+};
+
+type CandidateRelationshipSummary = {
+  relationTypes: string[];
+  profilesWithRelationships: number;
+  mutualProfileCount: number;
+  followsCount: number;
+  followedByCount: number;
+  connectionCount: number;
+  contactCount: number;
+};
+
+const RELATION_PRIORITY: Record<string, number> = {
+  followed_by: 0,
+  follows: 1,
+  connection: 2,
+  contact: 3,
+};
+
+const getProfileRelations = (socialProfileId: string) => (
+  db.select({ relationType: schema.relationshipEdges.relationType })
+    .from(schema.relationshipEdges)
+    .where(eq(schema.relationshipEdges.socialProfileId, socialProfileId))
+    .all()
+    .map((entry) => entry.relationType)
+    .filter((relationType): relationType is string => Boolean(relationType))
+    .sort((left, right) => (RELATION_PRIORITY[left] ?? 99) - (RELATION_PRIORITY[right] ?? 99) || left.localeCompare(right))
+);
+
+const summarizeCandidateRelationships = (profiles: CandidateProfileWithRelations[]): CandidateRelationshipSummary => {
+  const relationTypes = new Set<string>();
+  let profilesWithRelationships = 0;
+  let mutualProfileCount = 0;
+  let followsCount = 0;
+  let followedByCount = 0;
+  let connectionCount = 0;
+  let contactCount = 0;
+
+  for (const profile of profiles) {
+    if (profile.relations.length > 0) {
+      profilesWithRelationships += 1;
+    }
+
+    const relationSet = new Set(profile.relations);
+    for (const relation of relationSet) {
+      relationTypes.add(relation);
+    }
+
+    if (relationSet.has('follows')) {
+      followsCount += 1;
+    }
+    if (relationSet.has('followed_by')) {
+      followedByCount += 1;
+    }
+    if (relationSet.has('connection')) {
+      connectionCount += 1;
+    }
+    if (relationSet.has('contact')) {
+      contactCount += 1;
+    }
+    if (relationSet.has('follows') && relationSet.has('followed_by')) {
+      mutualProfileCount += 1;
+    }
+  }
+
+  return {
+    relationTypes: Array.from(relationTypes).sort((left, right) => (RELATION_PRIORITY[left] ?? 99) - (RELATION_PRIORITY[right] ?? 99) || left.localeCompare(right)),
+    profilesWithRelationships,
+    mutualProfileCount,
+    followsCount,
+    followedByCount,
+    connectionCount,
+    contactCount,
+  };
+};
+
 const parseSourceAccountAuthData = (authData: string | null | undefined): SourceAccountAuthData | null => {
   if (!authData) {
     return null;
@@ -617,14 +695,23 @@ async function startServer() {
         .all();
       
       const profiles = candidateProfiles.map(cp => {
-        return db.select().from(schema.socialProfiles)
+        const profile = db.select().from(schema.socialProfiles)
           .where(eq(schema.socialProfiles.id, cp.socialProfileId as string))
           .get();
-      }).filter(Boolean);
+        if (!profile) {
+          return null;
+        }
+
+        return {
+          ...profile,
+          relations: getProfileRelations(profile.id),
+        };
+      }).filter((profile): profile is CandidateProfileWithRelations => Boolean(profile));
 
       return {
         ...c,
         profiles,
+        relationshipSummary: summarizeCandidateRelationships(profiles),
       };
     });
 

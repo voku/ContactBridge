@@ -318,6 +318,27 @@ test('sync preserves both relationship directions for mutual Bluesky profiles', 
   `).all(sourceAccount.id, mutualProfile.did) as Array<{ relationType: string }>;
 
   assert.deepEqual(relationships.map((relationship) => relationship.relationType), ['followed_by', 'follows']);
+
+  const candidates = await getJson<Array<{
+    canonicalName: string;
+    profiles: Array<{ sourceType: string; relations: string[] }>;
+    relationshipSummary: {
+      relationTypes: string[];
+      profilesWithRelationships: number;
+      mutualProfileCount: number;
+      followsCount: number;
+      followedByCount: number;
+    };
+  }>>(server.baseUrl, '/api/candidates');
+
+  const mutualCandidate = candidates.find((candidate) => candidate.canonicalName === mutualProfile.displayName);
+  assert.ok(mutualCandidate);
+  assert.equal(mutualCandidate.relationshipSummary.mutualProfileCount, 1);
+  assert.equal(mutualCandidate.relationshipSummary.profilesWithRelationships, 1);
+  assert.equal(mutualCandidate.relationshipSummary.followsCount, 1);
+  assert.equal(mutualCandidate.relationshipSummary.followedByCount, 1);
+  assert.deepEqual(mutualCandidate.relationshipSummary.relationTypes, ['followed_by', 'follows']);
+  assert.deepEqual(mutualCandidate.profiles[0]?.relations, ['followed_by', 'follows']);
 });
 
 test('manual captures stay reviewable until approved and preserve notes', async (t) => {
