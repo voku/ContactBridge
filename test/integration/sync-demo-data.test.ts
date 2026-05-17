@@ -9,6 +9,8 @@ import { fileURLToPath } from 'node:url';
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
 const demoDataDir = path.join(repoRoot, 'test', 'demo-data');
+const MAX_HEALTH_CHECK_ATTEMPTS = 50;
+const HEALTH_CHECK_INTERVAL_MS = 200;
 
 type SyncCase = {
   name: string;
@@ -85,14 +87,14 @@ const getFreePort = async (): Promise<number> => {
 };
 
 const waitForHealth = async (baseUrl: string) => {
-  for (let attempt = 0; attempt < 50; attempt++) {
+  for (let attempt = 0; attempt < MAX_HEALTH_CHECK_ATTEMPTS; attempt++) {
     try {
       const response = await fetch(`${baseUrl}/api/health`);
       if (response.ok) {
         return;
       }
     } catch {}
-    await delay(200);
+    await delay(HEALTH_CHECK_INTERVAL_MS);
   }
 
   throw new Error(`Server did not become healthy: ${baseUrl}`);
