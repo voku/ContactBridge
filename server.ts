@@ -721,7 +721,7 @@ const getLinkedInProfilePictureUrl = (profilePicture: any) => {
   return '';
 };
 
-const serializeCandidateEvidenceReference = (handle: string, candidateId: string) => JSON.stringify({ candidateId, handle });
+const serializeCandidateEvidenceValue = (value: Record<string, string>) => JSON.stringify(value);
 
 const addCandidateMatchEvidence = (
   candidateId: string,
@@ -789,7 +789,7 @@ function assignProfileToCandidate(profileIdToUse: string, displayName: string, h
       if (candidateProfile?.contactCandidateId) {
         reviewEvidence.push({
           evidenceType: 'cross_source_handle_review',
-          evidenceValue: serializeCandidateEvidenceReference(normalizedHandle, candidateProfile.contactCandidateId),
+          evidenceValue: serializeCandidateEvidenceValue({ candidateId: candidateProfile.contactCandidateId, handle: normalizedHandle }),
           score: 75
         });
         break;
@@ -803,7 +803,7 @@ function assignProfileToCandidate(profileIdToUse: string, displayName: string, h
     if (sameNameCandidate?.id) {
       reviewEvidence.push({
         evidenceType: 'display_name_only_review',
-        evidenceValue: displayName,
+        evidenceValue: serializeCandidateEvidenceValue({ displayName }),
         score: 20
       });
     }
@@ -845,7 +845,7 @@ async function startServer() {
 
   app.use(cors({
     origin: (origin, callback) => {
-      if (!origin || corsAllowedOrigins.has(origin) || (isLocalMode && isLoopbackOrigin(origin))) {
+      if ((!origin && isLocalMode) || (origin && (corsAllowedOrigins.has(origin) || (isLocalMode && isLoopbackOrigin(origin))))) {
         callback(null, true);
         return;
       }
@@ -863,6 +863,10 @@ async function startServer() {
   app.delete("/api/database", (req, res) => {
     if (!isLocalMode) {
       return res.status(403).json({ error: "Database reset is only available in local or test mode." });
+    }
+
+    if (req.get("x-contactbridge-confirm-reset") !== "erase-local-data") {
+      return res.status(400).json({ error: "Database reset requires an explicit confirmation header." });
     }
 
     try {

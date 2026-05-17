@@ -22,6 +22,7 @@
   const trimText = (value) => (typeof value === 'string' ? value.replace(/\s+/g, ' ').trim() : '');
 
   // Add reviewed production hub origins here before packaging a hosted extension build.
+  // Values must be origins with protocol and host, for example: 'https://contactbridge.example.com'.
   const ALLOWED_PRODUCTION_HUB_ORIGINS = new Set([]);
 
   const isAllowedHubUrl = (url) => {

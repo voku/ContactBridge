@@ -182,7 +182,10 @@ const getJson = async <T>(baseUrl: string, pathname: string): Promise<T> => {
 };
 
 const deleteJson = async <T>(baseUrl: string, pathname: string): Promise<T> => {
-  const response = await fetch(`${baseUrl}${pathname}`, { method: 'DELETE' });
+  const response = await fetch(`${baseUrl}${pathname}`, {
+    method: 'DELETE',
+    headers: pathname === '/api/database' ? { 'X-ContactBridge-Confirm-Reset': 'erase-local-data' } : undefined
+  });
   assert.equal(response.ok, true, `Expected ${pathname} to succeed`);
   return response.json() as Promise<T>;
 };
