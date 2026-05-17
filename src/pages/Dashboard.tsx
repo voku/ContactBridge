@@ -16,7 +16,7 @@ interface SyncJob {
 }
 
 export default function Dashboard() {
-  const [stats, setStats] = useState({ totalCandidates: 0, approvedContacts: 0, changedProfiles: 0, failedSyncJobs: 0 });
+  const [stats, setStats] = useState({ totalCandidates: 0, approvedContacts: 0, indexedProfiles: 0, failedSyncJobs: 0 });
   const [syncJobs, setSyncJobs] = useState<SyncJob[]>([]);
 
   useEffect(() => {
@@ -93,12 +93,12 @@ export default function Dashboard() {
 
         <Card>
           <CardHeader className="flex flex-row items-center justify-between pb-2 space-y-0">
-            <CardTitle className="text-sm font-medium text-gray-500">Changed Profiles</CardTitle>
+            <CardTitle className="text-sm font-medium text-gray-500">Indexed Profiles</CardTitle>
             <UserPlus className="w-4 h-4 text-orange-600" />
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold">{stats.changedProfiles}</div>
-            <p className="text-xs text-gray-400 mt-1">Profiles indexed</p>
+            <div className="text-2xl font-bold">{stats.indexedProfiles}</div>
+            <p className="text-xs text-gray-400 mt-1">Profiles currently stored</p>
           </CardContent>
         </Card>
 
