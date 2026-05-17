@@ -690,7 +690,7 @@ async function startServer() {
     const approvedContacts = db.select().from(schema.contactCandidates).where(eq(schema.contactCandidates.status, 'approved')).all().length;
     const totalProfiles = db.select().from(schema.socialProfiles).all().length;
     const failedSyncJobs = db.select().from(schema.syncJobs).where(eq(schema.syncJobs.status, 'failed')).all().length;
-    res.json({ totalCandidates: pendingCandidates, approvedContacts, changedProfiles: totalProfiles, failedSyncJobs });
+    res.json({ totalCandidates: pendingCandidates, approvedContacts, indexedProfiles: totalProfiles, failedSyncJobs });
   });
 
   app.get("/api/dashboard/sync-jobs", (req, res) => {

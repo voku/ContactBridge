@@ -95,15 +95,6 @@ export default function SettingsPage() {
         </CardContent>
       </Card>
       
-      <Card>
-        <CardHeader>
-          <CardTitle>Consent Audit Log</CardTitle>
-          <CardDescription>Record of permissions you've granted.</CardDescription>
-        </CardHeader>
-        <CardContent>
-          <p className="text-sm text-gray-500">No consent events recorded yet.</p>
-        </CardContent>
-      </Card>
     </div>
   );
 }
