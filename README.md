@@ -35,7 +35,7 @@ The local development server runs the Express backend and serves the Vite fronte
 2. Create a local environment file:
 
    ```bash
-   cp /home/runner/work/ContactBridge/ContactBridge/.env.example /home/runner/work/ContactBridge/ContactBridge/.env.local
+   cp .env.example .env.local
    ```
 
 3. Set the values you need:
@@ -84,18 +84,18 @@ The workflow uses:
 
 - `VITE_BASE_PATH=/ContactBridge/`
 
-If you fork this repository, update `/home/runner/work/ContactBridge/ContactBridge/.github/workflows/deploy-pages.yml` and the canonical social URLs in `/home/runner/work/ContactBridge/ContactBridge/index.html`.
+If you fork this repository, update `.github/workflows/deploy-pages.yml` and the canonical social URLs in `index.html`.
 
 ## Browser extension
 
-The Chrome extension lives in `/home/runner/work/ContactBridge/ContactBridge/extension`.
+The Chrome extension lives in `extension/`.
 
 To load it locally:
 
 1. Open `chrome://extensions`
 2. Enable **Developer mode**
 3. Choose **Load unpacked**
-4. Select `/home/runner/work/ContactBridge/ContactBridge/extension`
+4. Select `extension/`
 
 ## Key Files Detector helper prompt
 
