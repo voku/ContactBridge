@@ -259,6 +259,10 @@ const mergeCandidateNotes = (notes: Array<string | null | undefined>) => {
   return mergedNotes.length > 0 ? mergedNotes.join('\n\n') : null;
 };
 
+const appendUniqueRelation = (relations: string[] | undefined, relation: string) => (
+  Array.from(new Set([...(relations || []), relation]))
+);
+
 const parseSourceAccountAuthData = (authData: string | null | undefined): SourceAccountAuthData | null => {
   if (!authData) {
     return null;
@@ -785,7 +789,7 @@ async function startServer() {
           avatarUrl: p.avatar,
           bio: p.description,
           rawJson: JSON.stringify(p),
-          relations: existing ? Array.from(new Set([...existing.relations, relation])) : [relation],
+          relations: appendUniqueRelation(existing?.relations, relation),
         });
       };
 
@@ -946,7 +950,7 @@ async function startServer() {
           avatarUrl: p.avatar,
           bio: p.note ? p.note.replace(/<[^>]*>?/gm, '') : '', // strip HTML
           rawJson: JSON.stringify(p),
-          relations: existing ? Array.from(new Set([...existing.relations, relation])) : [relation],
+          relations: appendUniqueRelation(existing?.relations, relation),
         });
       };
 
@@ -1264,7 +1268,7 @@ async function startServer() {
           avatarUrl: p.profile_image_url,
           bio: p.description,
           rawJson: JSON.stringify(p),
-          relations: existing ? Array.from(new Set([...existing.relations, relation])) : [relation],
+          relations: appendUniqueRelation(existing?.relations, relation),
         });
       };
 
