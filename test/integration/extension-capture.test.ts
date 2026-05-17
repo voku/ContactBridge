@@ -5,6 +5,7 @@ await import(new URL('../../extension/shared.js', import.meta.url).href);
 
 const extensionApi = (globalThis as typeof globalThis & {
   ContactBridgeExtension: {
+    CAPTURE_SCRIPT_FILES: string[];
     extractProfileFromDocument: (doc: any, url: string) => {
       displayName: string;
       handle: string;
@@ -69,6 +70,17 @@ test('extractProfileFromDocument reuses shared selectors for supported networks'
     profileUrl: 'https://www.xing.com/profile/Jane_Demo',
     source: 'xing'
   });
+
+  const xingTitleFallback = extensionApi.extractProfileFromDocument(createDocument({}, 'Jane Example | XING'),
+    'https://www.xing.com/profile/Jane_Example');
+
+  assert.deepEqual(xingTitleFallback, {
+    displayName: 'Jane Example',
+    handle: 'Jane_Example',
+    headline: '',
+    profileUrl: 'https://www.xing.com/profile/Jane_Example',
+    source: 'xing'
+  });
 });
 
 test('handleBackgroundMessage routes capture requests through script injection', async () => {
@@ -107,7 +119,7 @@ test('handleBackgroundMessage routes capture requests through script injection',
   assert.deepEqual(calls, [
     {
       payload: {
-        files: ['shared.js', 'content.js'],
+        files: extensionApi.CAPTURE_SCRIPT_FILES,
         target: { tabId: 42 }
       },
       type: 'executeScript'

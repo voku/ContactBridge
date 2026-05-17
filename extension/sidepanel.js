@@ -46,6 +46,13 @@ document.addEventListener('DOMContentLoaded', () => {
       
       const tab = tabs[0];
       const url = tab.url || '';
+      if (typeof tab.id !== 'number') {
+        currentProfile = null;
+        renderProfileMessage('Active tab unavailable. Try focusing the page again.');
+        captureBtn.disabled = true;
+        captureBtn.textContent = 'Save this profile';
+        return;
+      }
 
       const profileContext = extensionApi.getProfileContext(url);
       if (profileContext.isSupported && profileContext.originPattern) {

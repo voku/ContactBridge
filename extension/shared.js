@@ -1,4 +1,5 @@
 (() => {
+  const CAPTURE_SCRIPT_FILES = ['shared.js', 'content.js'];
   const X_RESERVED_PATH_SEGMENTS = new Set([
     '',
     'compose',
@@ -143,7 +144,7 @@
 
   const requestCapturedProfile = (chromeApi, tabId, callback) => {
     chromeApi.scripting.executeScript({
-      files: ['shared.js', 'content.js'],
+      files: CAPTURE_SCRIPT_FILES,
       target: { tabId }
     }, () => {
       const injectionError = chromeApi.runtime.lastError;
@@ -184,6 +185,7 @@
   };
 
   globalThis.ContactBridgeExtension = {
+    CAPTURE_SCRIPT_FILES,
     extractProfileFromDocument,
     getProfileContext,
     handleBackgroundMessage,
