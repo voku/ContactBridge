@@ -1,4 +1,5 @@
 document.addEventListener('DOMContentLoaded', () => {
+  const extensionApi = globalThis.ContactBridgeExtension;
   const apiUrlInput = document.getElementById('apiUrl');
   const saveConfigBtn = document.getElementById('saveConfigBtn');
   const captureBtn = document.getElementById('captureBtn');
@@ -32,6 +33,13 @@ document.addEventListener('DOMContentLoaded', () => {
     checkCurrentTab();
   }
 
+  function renderProfileMessage(message) {
+    const text = document.createElement('p');
+    text.className = 'muted';
+    text.textContent = message;
+    profileDataDiv.replaceChildren(text);
+  }
+
   function checkCurrentTab() {
     chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
       if (!tabs[0]) return;
@@ -39,35 +47,17 @@ document.addEventListener('DOMContentLoaded', () => {
       const tab = tabs[0];
       const url = tab.url || '';
 
-      let parsedUrl;
-      try {
-        parsedUrl = new URL(url);
-      } catch {
-        profileDataDiv.innerHTML = '<p class="muted">Navigate to a supported profile (LinkedIn, X, Bluesky, XING) to capture.</p>';
-        captureBtn.disabled = true;
-        return;
-      }
-
-      const hostname = parsedUrl.hostname.toLowerCase();
-      const pathname = parsedUrl.pathname;
-      const isSupportedProfile =
-        (/(^|\.)linkedin\.com$/.test(hostname) && pathname.startsWith('/in/')) ||
-        ((/(^|\.)x\.com$/.test(hostname) || /(^|\.)twitter\.com$/.test(hostname)) && pathname !== '/') ||
-        (hostname === 'bsky.app' && pathname.startsWith('/profile/')) ||
-        (/(^|\.)xing\.com$/.test(hostname) && pathname.startsWith('/profile/'));
-
-      if (isSupportedProfile) {
-        const origin = parsedUrl.origin + '/*';
-        
-        chrome.permissions.contains({ origins: [origin] }, (hasPermission) => {
+      const profileContext = extensionApi.getProfileContext(url);
+      if (profileContext.isSupported && profileContext.originPattern) {
+        chrome.permissions.contains({ origins: [profileContext.originPattern] }, (hasPermission) => {
           if (hasPermission) {
             extractData(tab.id);
           } else {
-            profileDataDiv.innerHTML = `<p class="muted">Click below to allow access to ${parsedUrl.hostname} and capture this profile.</p>`;
+            renderProfileMessage(`Click below to allow access to ${new URL(profileContext.profileUrl).hostname} and capture this profile.`);
             captureBtn.textContent = 'Grant Access & Capture';
             captureBtn.disabled = false;
             captureBtn.onclick = () => {
-              chrome.permissions.request({ origins: [origin] }, (granted) => {
+              chrome.permissions.request({ origins: [profileContext.originPattern] }, (granted) => {
                 if (granted) {
                   captureBtn.textContent = 'Save this profile';
                   checkCurrentTab();
@@ -77,33 +67,36 @@ document.addEventListener('DOMContentLoaded', () => {
           }
         });
       } else {
-        profileDataDiv.innerHTML = '<p class="muted">Navigate to a supported profile (LinkedIn, X, Bluesky, XING) to capture.</p>';
+        currentProfile = null;
+        renderProfileMessage('Navigate to a supported profile (LinkedIn, X, Bluesky, XING) to capture.');
         captureBtn.disabled = true;
+        captureBtn.textContent = 'Save this profile';
       }
     });
   }
 
   function extractData(tabId) {
-    chrome.scripting.executeScript({
-      target: { tabId: tabId },
-      files: ['content.js']
-    }, () => {
+    currentProfile = null;
+    renderProfileMessage('Reading profile data...');
+    captureBtn.disabled = true;
+    chrome.runtime.sendMessage({ action: 'capture_profile', tabId }, (response) => {
       if (chrome.runtime.lastError) {
-         profileDataDiv.innerHTML = `<p class="muted">Cannot access this page: ${chrome.runtime.lastError.message}</p>`;
-         return;
+        renderProfileMessage(`Cannot access this page: ${chrome.runtime.lastError.message}`);
+        captureBtn.textContent = 'Save this profile';
+        return;
       }
-      chrome.tabs.sendMessage(tabId, { action: 'get_profile' }, (response) => {
-        if (response && response.source !== 'unknown') {
-          currentProfile = response;
-          renderProfileData(response);
-          captureBtn.disabled = false;
-          captureBtn.textContent = 'Save this profile';
-          captureBtn.onclick = saveProfile;
-        } else {
-          profileDataDiv.innerHTML = '<p class="muted">Could not extract profile data from this page.</p>';
-          captureBtn.disabled = true;
-        }
-      });
+
+      if (response?.ok && response.profile) {
+        currentProfile = response.profile;
+        renderProfileData(response.profile);
+        captureBtn.disabled = false;
+        captureBtn.textContent = 'Save this profile';
+        captureBtn.onclick = saveProfile;
+        return;
+      }
+
+      renderProfileMessage(response?.error || 'Could not extract profile data from this page.');
+      captureBtn.textContent = 'Save this profile';
     });
   }
 
