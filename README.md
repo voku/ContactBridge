@@ -71,6 +71,40 @@ Required environment variables:
 - `APP_URL`: absolute backend origin, for example `https://api.example.com`
 - `VITE_API_BASE_URL`: optional absolute API origin for separately hosted frontends
 
+### Step-by-step live switch guide
+
+Use this checklist when you are ready to move ContactBridge from local or staging usage to the live environment.
+
+1. Pick your production shape:
+   - **Single host:** deploy the Express API and frontend together with `npm run build`
+   - **Split host:** deploy the backend separately and publish the frontend with `npm run build:client` or GitHub Pages
+2. Provision a public backend URL and set `APP_URL` to that exact origin.
+3. Choose a persistent SQLite file location and set `CONTACTBRIDGE_DB_PATH` if you do not want to use the default `sqlite.db` in the app directory.
+4. If the frontend will live on a different origin, set `VITE_API_BASE_URL` to the public backend URL before building the frontend.
+5. Install dependencies and verify the release locally:
+
+   ```bash
+   npm install
+   npm run test:integration
+   npm run lint
+   npm run build
+   ```
+
+6. If you already have production data, copy the current SQLite database to the new `CONTACTBRIDGE_DB_PATH` location before starting the new server.
+7. Deploy the backend, start it with `npm run start`, and confirm `GET /api/health` returns `{"status":"ok"}`.
+8. Update OAuth callback settings so every provider points to the live backend:
+   - `https://YOUR_APP_URL/auth/google/callback`
+   - `https://YOUR_APP_URL/auth/x/callback`
+9. If you are using a separately hosted frontend, build and publish that frontend only after `VITE_API_BASE_URL` is set for the live backend.
+10. Switch traffic to the live deployment by updating DNS, your reverse proxy, or your public frontend URL.
+11. Run a smoke test in production:
+    - open the dashboard
+    - add or reconnect a source
+    - run a sync
+    - review candidates
+    - export contacts
+12. Keep the previous deployment and database backup until the live instance has been stable long enough for you to roll back safely if needed.
+
 ### GitHub Pages frontend deployment
 
 This repository includes a GitHub Actions workflow that deploys the Vite frontend to GitHub Pages on pushes to `main`.
