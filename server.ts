@@ -1,4 +1,6 @@
 import express from "express";
+import fs from "fs/promises";
+import net from "net";
 import path from "path";
 import cors from "cors";
 import dotenv from "dotenv";
@@ -13,7 +15,7 @@ import { TwitterApi } from "twitter-api-v2";
 dotenv.config({ path: '.env.local', override: true });
 dotenv.config();
 
-const sqlite = new Database('sqlite.db');
+const sqlite = new Database(process.env.CONTACTBRIDGE_DB_PATH || 'sqlite.db');
 
 sqlite.exec(`
   CREATE TABLE IF NOT EXISTS source_accounts (
@@ -83,6 +85,144 @@ try {
 
 export const db = drizzle(sqlite, { schema });
 
+const loadDemoFixture = async <T>(integration: string): Promise<T | null> => {
+  const demoDataDir = process.env.CONTACTBRIDGE_DEMO_DATA_DIR;
+  if (!demoDataDir) {
+    return null;
+  }
+
+  try {
+    const filePath = path.join(demoDataDir, `${integration}.json`);
+    const raw = await fs.readFile(filePath, 'utf8');
+    return JSON.parse(raw) as T;
+  } catch (error: unknown) {
+    if (typeof error === 'object' && error !== null && 'code' in error && error.code === 'ENOENT') {
+      return null;
+    }
+    throw error;
+  }
+};
+
+const createRateLimiter = (windowMs: number, maxRequests: number) => {
+  const requestLog = new Map<string, { count: number, resetAt: number }>();
+
+  return (req: express.Request, res: express.Response, next: express.NextFunction) => {
+    const now = Date.now();
+    const clientKey = req.ip || req.socket.remoteAddress || 'unknown';
+    const currentEntry = requestLog.get(clientKey);
+
+    if (!currentEntry || currentEntry.resetAt <= now) {
+      requestLog.set(clientKey, { count: 1, resetAt: now + windowMs });
+      next();
+      return;
+    }
+
+    if (currentEntry.count >= maxRequests) {
+      res.status(429).json({ error: 'Too many requests. Please try again later.' });
+      return;
+    }
+
+    currentEntry.count += 1;
+    next();
+  };
+};
+
+const LINKEDIN_CONNECTIONS_PROJECTION = '(elements*(to,to~(id,firstName,lastName,headline,profilePicture,publicIdentifier)))';
+
+const normalizeMastodonInstanceUrl = (instance: string) => {
+  const candidate = instance.startsWith('http://') || instance.startsWith('https://')
+    ? instance
+    : `https://${instance}`;
+  const instanceUrl = new URL(candidate);
+
+  if (instanceUrl.protocol !== 'https:') {
+    throw new Error('Mastodon instance URL must use HTTPS');
+  }
+
+  const hostname = instanceUrl.hostname.toLowerCase();
+  if (!hostname || hostname === 'localhost' || hostname.endsWith('.local')) {
+    throw new Error('Mastodon instance URL must use a public hostname');
+  }
+
+  if (net.isIP(hostname)) {
+    // Unique local IPv6 addresses live in the fc00::/7 range, which includes both fc00::/8 and fd00::/8.
+    const isUniqueLocalIpv6 = /^(fc|fd)[0-9a-f]{2}:/i.test(hostname);
+    // Matches the fe80::/10 IPv6 link-local range (fe80:: through febf::).
+    const isLinkLocalIpv6 = /^fe[89ab][0-9a-f]:/i.test(hostname);
+
+    if (
+      hostname === '::1' ||
+      hostname === '::' ||
+      isUniqueLocalIpv6 ||
+      isLinkLocalIpv6 ||
+      /^10\./.test(hostname) ||
+      /^127\./.test(hostname) ||
+      /^169\.254\./.test(hostname) ||
+      /^192\.168\./.test(hostname) ||
+      /^172\.(1[6-9]|2\d|3[0-1])\./.test(hostname)
+    ) {
+      throw new Error('Mastodon instance URL must not target a private or loopback address');
+    }
+  }
+
+  instanceUrl.pathname = '';
+  instanceUrl.search = '';
+  instanceUrl.hash = '';
+
+  return instanceUrl.toString().replace(/\/$/, '');
+};
+
+const getLinkedInLocalizedText = (value: any) => {
+  if (!value) {
+    return '';
+  }
+
+  if (typeof value === 'string') {
+    return value;
+  }
+
+  if (value.localized && typeof value.localized === 'object') {
+    const preferredLocaleKey = value.preferredLocale?.language && value.preferredLocale?.country
+      ? `${value.preferredLocale.language}_${value.preferredLocale.country}`
+      : null;
+
+    if (preferredLocaleKey && typeof value.localized[preferredLocaleKey] === 'string') {
+      return value.localized[preferredLocaleKey];
+    }
+
+    const firstLocalizedValue = Object.values(value.localized).find((entry) => typeof entry === 'string');
+    if (typeof firstLocalizedValue === 'string') {
+      return firstLocalizedValue;
+    }
+  }
+
+  return '';
+};
+
+const getLinkedInProfilePictureUrl = (profilePicture: any) => {
+  if (!profilePicture) {
+    return '';
+  }
+
+  if (typeof profilePicture.displayImage === 'string' && /^https?:\/\//.test(profilePicture.displayImage)) {
+    return profilePicture.displayImage;
+  }
+
+  const displayImageElements = profilePicture['displayImage~']?.elements;
+  if (!Array.isArray(displayImageElements)) {
+    return '';
+  }
+
+  for (const element of [...displayImageElements].reverse()) {
+    const identifier = element?.identifiers?.find((entry: any) => typeof entry?.identifier === 'string');
+    if (identifier?.identifier) {
+      return identifier.identifier;
+    }
+  }
+
+  return '';
+};
+
 function assignProfileToCandidate(profileIdToUse: string, displayName: string, handle: string, now: Date) {
   const existingCandidateProfile = db.select().from(schema.contactCandidateProfiles)
     .where(eq(schema.contactCandidateProfiles.socialProfileId, profileIdToUse))
@@ -140,7 +280,8 @@ function assignProfileToCandidate(profileIdToUse: string, displayName: string, h
 
 async function startServer() {
   const app = express();
-  const PORT = 3000;
+  const PORT = Number(process.env.PORT || 3000);
+  const syncRateLimiter = createRateLimiter(60_000, 10);
 
   app.use(cors());
   app.use(express.json());
@@ -299,7 +440,7 @@ async function startServer() {
   };
 
   // AT-Protocol implementation (Bluesky sync job)
-  app.post("/api/sync/bluesky", async (req, res) => {
+  app.post("/api/sync/bluesky", syncRateLimiter, async (req, res) => {
     const { sourceAccountId, identifier, password } = req.body;
     const syncJobId = uuidv4();
     const now = new Date();
@@ -314,16 +455,31 @@ async function startServer() {
         startedAt: now,
       }).run();
 
-      stream.progress('Connecting to API...');
-      const { BskyAgent } = await import('@atproto/api');
-      const agent = new BskyAgent({ service: 'https://bsky.social' });
-      await agent.login({ identifier, password });
+      const demoData = await loadDemoFixture<{
+        followersResponse?: { followers?: any[] },
+        followsResponse?: { follows?: any[] }
+      }>('bluesky');
+      let followers: any[] = [];
+      let follows: any[] = [];
 
-      stream.progress('Fetching followers...');
-      const followersResponse = await agent.getFollowers({ actor: agent.session!.did });
-      
-      stream.progress('Fetching follows...');
-      const followsResponse = await agent.getFollows({ actor: agent.session!.did });
+      if (demoData) {
+        stream.progress('Loading demo data...');
+        followers = demoData.followersResponse?.followers || [];
+        follows = demoData.followsResponse?.follows || [];
+      } else {
+        stream.progress('Connecting to API...');
+        const { BskyAgent } = await import('@atproto/api');
+        const agent = new BskyAgent({ service: 'https://bsky.social' });
+        await agent.login({ identifier, password });
+
+        stream.progress('Fetching followers...');
+        const followersResponse = await agent.getFollowers({ actor: agent.session!.did });
+        
+        stream.progress('Fetching follows...');
+        const followsResponse = await agent.getFollows({ actor: agent.session!.did });
+        followers = followersResponse.data.followers;
+        follows = followsResponse.data.follows;
+      }
       
       const allProfilesMap = new Map();
 
@@ -341,8 +497,8 @@ async function startServer() {
       };
 
       stream.progress('Processing profiles...');
-      followersResponse.data.followers.forEach(p => processProfile(p, 'followed_by'));
-      followsResponse.data.follows.forEach(p => processProfile(p, 'follows'));
+      followers.forEach(p => processProfile(p, 'followed_by'));
+      follows.forEach(p => processProfile(p, 'follows'));
       // Note: for ones that are mutually following, 'follows' might overwrite 'followed_by', which is fine for MVP
 
       let insertedCount = 0;
@@ -415,7 +571,7 @@ async function startServer() {
     }
   });
 
-  app.post("/api/sync/mastodon", async (req, res) => {
+  app.post("/api/sync/mastodon", syncRateLimiter, async (req, res) => {
     const { sourceAccountId, instance, token } = req.body;
     const syncJobId = uuidv4();
     const now = new Date();
@@ -430,48 +586,58 @@ async function startServer() {
         startedAt: now,
       }).run();
 
-      const instanceUrl = instance.startsWith('http') ? instance : `https://${instance}`;
-      
-      let verifyRes;
-      try {
-        stream.progress('Connecting to API...');
-        verifyRes = await fetch(`${instanceUrl}/api/v1/accounts/verify_credentials`, {
+      const demoData = await loadDemoFixture<{ selfAccount?: { id: string }, followers?: any[], following?: any[] }>('mastodon');
+      let followers: any[] = [];
+      let following: any[] = [];
+
+      if (demoData) {
+        stream.progress('Loading demo data...');
+        followers = demoData.followers || [];
+        following = demoData.following || [];
+      } else {
+        const instanceUrl = normalizeMastodonInstanceUrl(instance);
+        
+        let verifyRes;
+        try {
+          stream.progress('Connecting to API...');
+          verifyRes = await fetch(`${instanceUrl}/api/v1/accounts/verify_credentials`, {
+            headers: {
+              'Authorization': `Bearer ${token}`
+            }
+          });
+        } catch (err: any) {
+          throw new Error(`Could not connect to instance. Please check the URL. (${err.message})`);
+        }
+
+        if (!verifyRes.ok) {
+          if (verifyRes.status === 401) {
+            throw new Error('Invalid access token');
+          } else if (verifyRes.status === 404) {
+            throw new Error('Instance not found or API endpoint missing');
+          } else {
+            throw new Error(`Failed to verify credentials: ${verifyRes.status} ${verifyRes.statusText}`);
+          }
+        }
+        const selfAccount = await verifyRes.json();
+        const mastodonId = selfAccount.id;
+
+        stream.progress('Fetching followers...');
+        const followersRes = await fetch(`${instanceUrl}/api/v1/accounts/${mastodonId}/followers?limit=80`, {
           headers: {
             'Authorization': `Bearer ${token}`
           }
         });
-      } catch (err: any) {
-        throw new Error(`Could not connect to instance. Please check the URL. (${err.message})`);
+        
+        stream.progress('Fetching following...');
+        const followingRes = await fetch(`${instanceUrl}/api/v1/accounts/${mastodonId}/following?limit=80`, {
+          headers: {
+            'Authorization': `Bearer ${token}`
+          }
+        });
+
+        followers = followersRes.ok ? await followersRes.json() : [];
+        following = followingRes.ok ? await followingRes.json() : [];
       }
-
-      if (!verifyRes.ok) {
-        if (verifyRes.status === 401) {
-          throw new Error('Invalid access token');
-        } else if (verifyRes.status === 404) {
-          throw new Error('Instance not found or API endpoint missing');
-        } else {
-          throw new Error(`Failed to verify credentials: ${verifyRes.status} ${verifyRes.statusText}`);
-        }
-      }
-      const selfAccount = await verifyRes.json();
-      const mastodonId = selfAccount.id;
-
-      stream.progress('Fetching followers...');
-      const followersRes = await fetch(`${instanceUrl}/api/v1/accounts/${mastodonId}/followers?limit=80`, {
-        headers: {
-          'Authorization': `Bearer ${token}`
-        }
-      });
-      
-      stream.progress('Fetching following...');
-      const followingRes = await fetch(`${instanceUrl}/api/v1/accounts/${mastodonId}/following?limit=80`, {
-        headers: {
-          'Authorization': `Bearer ${token}`
-        }
-      });
-
-      const followers = followersRes.ok ? await followersRes.json() : [];
-      const following = followingRes.ok ? await followingRes.json() : [];
       
       const allProfilesMap = new Map();
 
@@ -562,7 +728,7 @@ async function startServer() {
 
   const oauthStore = new Map<string, { codeVerifier: string, state: string, clientId: string, clientSecret: string }>();
 
-  app.post('/api/auth/x/url', (req, res) => {
+  app.post('/api/auth/x/url', syncRateLimiter, (req, res) => {
     try {
       const { clientId, clientSecret } = req.body;
       if (!clientId || !clientSecret) {
@@ -623,7 +789,7 @@ async function startServer() {
 
   const googleOauthStore = new Map<string, { clientId: string, clientSecret: string }>();
 
-  app.post('/api/auth/google/url', async (req, res) => {
+  app.post('/api/auth/google/url', syncRateLimiter, async (req, res) => {
     try {
       const { clientId, clientSecret } = req.body;
       if (!clientId || !clientSecret) {
@@ -683,7 +849,7 @@ async function startServer() {
     }
   });
 
-  app.post("/api/sync/x", async (req, res) => {
+  app.post("/api/sync/x", syncRateLimiter, async (req, res) => {
     const { sourceAccountId, accessToken } = req.body;
     const syncJobId = uuidv4();
     const now = new Date();
@@ -698,34 +864,43 @@ async function startServer() {
         startedAt: now,
       }).run();
 
-      stream.progress('Connecting to API...');
-      const client = new TwitterApi(accessToken);
-
-      // Find user
-      const userRes = await client.v2.me();
-      if (!userRes.data) {
-        throw new Error(`Could not fetch authenticated X user.`);
-      }
-      
-      const xUserId = userRes.data.id;
-
       let followers: any[] = [];
       let follows: any[] = [];
-      
-      try {
-        stream.progress('Fetching followers...');
-        const followersPaginator = await client.v2.followers(xUserId, { max_results: 100, "user.fields": ["description", "profile_image_url", "name", "username"] });
-        followers = followersPaginator.data || [];
-      } catch (e: any) {
-        console.error("Error fetching followers from X:", e);
-      }
+      const demoData = await loadDemoFixture<{
+        followersResponse?: { data?: any[] },
+        followingResponse?: { data?: any[] }
+      }>('x');
 
-      try {
-        stream.progress('Fetching follows...');
-        const followsPaginator = await client.v2.following(xUserId, { max_results: 100, "user.fields": ["description", "profile_image_url", "name", "username"] });
-        follows = followsPaginator.data || [];
-      } catch (e: any) {
-        console.error("Error fetching follows from X:", e);
+      if (demoData) {
+        stream.progress('Loading demo data...');
+        followers = demoData.followersResponse?.data || [];
+        follows = demoData.followingResponse?.data || [];
+      } else {
+        stream.progress('Connecting to API...');
+        const client = new TwitterApi(accessToken);
+
+        const userRes = await client.v2.me();
+        if (!userRes.data) {
+          throw new Error(`Could not fetch authenticated X user.`);
+        }
+        
+        const xUserId = userRes.data.id;
+        
+        try {
+          stream.progress('Fetching followers...');
+          const followersPaginator = await client.v2.followers(xUserId, { max_results: 100, "user.fields": ["description", "profile_image_url", "name", "username"] });
+          followers = followersPaginator.data || [];
+        } catch (e: any) {
+          console.error("Error fetching followers from X:", e);
+        }
+
+        try {
+          stream.progress('Fetching follows...');
+          const followsPaginator = await client.v2.following(xUserId, { max_results: 100, "user.fields": ["description", "profile_image_url", "name", "username"] });
+          follows = followsPaginator.data || [];
+        } catch (e: any) {
+          console.error("Error fetching follows from X:", e);
+        }
       }
 
       const allProfilesMap = new Map();
@@ -813,7 +988,7 @@ async function startServer() {
     }
   });
 
-  app.post("/api/sync/linkedin", async (req, res) => {
+  app.post("/api/sync/linkedin", syncRateLimiter, async (req, res) => {
     const { sourceAccountId, handle, token } = req.body;
     const syncJobId = uuidv4();
     const now = new Date();
@@ -828,47 +1003,62 @@ async function startServer() {
         startedAt: now,
       }).run();
 
-      stream.progress('Connecting to API...');
-      const connectionsRes = await fetch(`https://api.linkedin.com/v2/connections?q=viewer&start=0&count=100`, {
-        headers: {
-          'Authorization': `Bearer ${token}`,
-          'X-Restli-Protocol-Version': '2.0.0'
-        }
-      });
+      let elements: any[] = [];
+      const demoData = await loadDemoFixture<{ elements?: any[] }>('linkedin');
 
-      if (!connectionsRes.ok) {
-        let errorDetails = '';
-        try {
-          const errJson = await connectionsRes.json();
-          errorDetails = JSON.stringify(errJson);
-        } catch (e) {}
+      if (demoData) {
+        stream.progress('Loading demo data...');
+        elements = demoData.elements || [];
+      } else {
+        stream.progress('Connecting to API...');
+        const connectionsRes = await fetch(
+          `https://api.linkedin.com/v2/connections?q=viewer&start=0&count=100&projection=${encodeURIComponent(LINKEDIN_CONNECTIONS_PROJECTION)}`,
+          {
+          headers: {
+            'Authorization': `Bearer ${token}`,
+            'X-Restli-Protocol-Version': '2.0.0'
+          }
+        });
 
-        if (connectionsRes.status === 401 || connectionsRes.status === 403) {
-          throw new Error(`Permission Denied / Unauthorized: The LinkedIn API requires approved partner access for full connection scraping. Verify your token has r_liteprofile and r_network scopes. (${connectionsRes.status}) ${errorDetails}`);
-        } else if (connectionsRes.status === 429) {
-          throw new Error(`Rate Limit Exceeded: LinkedIn API rate limits reached. Please wait before trying again. (${connectionsRes.status})`);
-        } else {
-          throw new Error(`Failed to fetch LinkedIn connections: ${connectionsRes.status} ${connectionsRes.statusText} ${errorDetails}`);
+        if (!connectionsRes.ok) {
+          let errorDetails = '';
+          try {
+            const errJson = await connectionsRes.json();
+            errorDetails = JSON.stringify(errJson);
+          } catch (e) {}
+
+          if (connectionsRes.status === 401 || connectionsRes.status === 403) {
+            throw new Error(`Permission Denied / Unauthorized: The LinkedIn API requires approved partner access for full connection scraping. Verify your token has r_liteprofile and r_network scopes. (${connectionsRes.status}) ${errorDetails}`);
+          } else if (connectionsRes.status === 429) {
+            throw new Error(`Rate Limit Exceeded: LinkedIn API rate limits reached. Please wait before trying again. (${connectionsRes.status})`);
+          } else {
+            throw new Error(`Failed to fetch LinkedIn connections: ${connectionsRes.status} ${connectionsRes.statusText} ${errorDetails}`);
+          }
         }
+
+        stream.progress('Processing profiles...');
+        const connectionsData = await connectionsRes.json();
+        elements = connectionsData.elements || [];
       }
-
-      stream.progress('Processing profiles...');
-      const connectionsData = await connectionsRes.json();
-      const elements = connectionsData.elements || [];
 
       let insertedCount = 0;
       let updatedCount = 0;
 
       stream.progress('Merging duplicates in database...');
       for (const p of elements) {
-        // Map LinkedIn entity fields
-        const sourceProfileId = p.to || p.entityUrn?.replace('urn:li:fs_miniProfile:', '') || p.id || uuidv4();
-        const firstName = p.firstName?.localized?.en_US || p.firstName || '';
-        const lastName = p.lastName?.localized?.en_US || p.lastName || '';
+        const profile = p['to~'] || p;
+        const sourceProfileId =
+          profile.id ||
+          (typeof p.to === 'string' ? p.to.replace(/^urn:li:person:/, '') : null) ||
+          p.entityUrn?.replace('urn:li:fs_miniProfile:', '') ||
+          p.id ||
+          uuidv4();
+        const firstName = getLinkedInLocalizedText(profile.firstName);
+        const lastName = getLinkedInLocalizedText(profile.lastName);
         const displayName = `${firstName} ${lastName}`.trim() || 'LinkedIn User';
-        const avatarUrl = p.profilePicture?.displayImage || '';
-        const profileHandle = p.publicIdentifier || sourceProfileId;
-        const bio = p.headline || '';
+        const avatarUrl = getLinkedInProfilePictureUrl(profile.profilePicture);
+        const profileHandle = profile.publicIdentifier || sourceProfileId;
+        const bio = getLinkedInLocalizedText(profile.headline);
 
         let existingProfile = db.select().from(schema.socialProfiles)
           .where(eq(schema.socialProfiles.sourceProfileId, sourceProfileId))
@@ -931,7 +1121,7 @@ async function startServer() {
     }
   });
 
-  app.post("/api/sync/github", async (req, res) => {
+  app.post("/api/sync/github", syncRateLimiter, async (req, res) => {
     const { sourceAccountId, token } = req.body;
     const syncJobId = uuidv4();
     const now = new Date();
@@ -946,25 +1136,6 @@ async function startServer() {
         startedAt: now,
       }).run();
 
-      stream.progress('Connecting to API...');
-      const verifyRes = await fetch("https://api.github.com/user", {
-        headers: {
-          'Authorization': `token ${token}`,
-          'Accept': 'application/vnd.github.v3+json'
-        }
-      });
-
-      if (!verifyRes.ok) {
-        if (verifyRes.status === 401) {
-          throw new Error('Invalid access token');
-        } else {
-          throw new Error(`Failed to verify GitHub credentials: ${verifyRes.status} ${verifyRes.statusText}`);
-        }
-      }
-
-      const selfAccount = await verifyRes.json();
-
-      stream.progress('Fetching followers...');
       const fetchAllGitHubPages = async (url: string) => {
         let results: any[] = [];
         let currentUrl = url;
@@ -998,10 +1169,40 @@ async function startServer() {
         return results;
       };
 
-      const followers = await fetchAllGitHubPages(`https://api.github.com/user/followers?per_page=100`);
-      
-      stream.progress('Fetching following...');
-      const following = await fetchAllGitHubPages(`https://api.github.com/user/following?per_page=100`);
+      const demoData = await loadDemoFixture<{
+        followersResponse?: any[],
+        followingResponse?: any[]
+      }>('github');
+      let followers: any[] = [];
+      let following: any[] = [];
+
+      if (demoData) {
+        stream.progress('Loading demo data...');
+        followers = demoData.followersResponse || [];
+        following = demoData.followingResponse || [];
+      } else {
+        stream.progress('Connecting to API...');
+        const verifyRes = await fetch("https://api.github.com/user", {
+          headers: {
+            'Authorization': `token ${token}`,
+            'Accept': 'application/vnd.github.v3+json'
+          }
+        });
+
+        if (!verifyRes.ok) {
+          if (verifyRes.status === 401) {
+            throw new Error('Invalid access token');
+          } else {
+            throw new Error(`Failed to verify GitHub credentials: ${verifyRes.status} ${verifyRes.statusText}`);
+          }
+        }
+
+        stream.progress('Fetching followers...');
+        followers = await fetchAllGitHubPages(`https://api.github.com/user/followers?per_page=100`);
+        
+        stream.progress('Fetching following...');
+        following = await fetchAllGitHubPages(`https://api.github.com/user/following?per_page=100`);
+      }
       
       const allProfilesMap = new Map();
 
@@ -1092,24 +1293,13 @@ async function startServer() {
     }
   });
 
-  app.post("/api/sync/google", async (req, res) => {
+  app.post("/api/sync/google", syncRateLimiter, async (req, res) => {
     const { sourceAccountId, tokens, clientId, clientSecret, token } = req.body;
     const syncJobId = uuidv4();
     const now = new Date();
     const stream = createStream(res);
     
     try {
-      const { OAuth2Client } = await import('google-auth-library');
-      let authClient: any;
-      if (clientId && clientSecret && tokens) {
-        authClient = new OAuth2Client(clientId, clientSecret);
-        authClient.setCredentials(tokens);
-      } else {
-        // Fallback to literal token (as originally used via OAuth Playground)
-        authClient = new OAuth2Client();
-        authClient.setCredentials({ access_token: token });
-      }
-
       stream.progress('Initializing sync job...');
       db.insert(schema.syncJobs).values({
         id: syncJobId,
@@ -1118,24 +1308,46 @@ async function startServer() {
         startedAt: now,
       }).run();
 
-      stream.progress('Connecting to Google People API...');
-      const fields = 'names,emailAddresses,photos,biographies,urls,organizations';
-      let nextPageToken = '';
       let allConnections: any[] = [];
+      const demoData = await loadDemoFixture<{
+        pages?: Array<{ connections?: any[] }>,
+        connections?: any[]
+      }>('google');
 
-      do {
-        const url = `https://people.googleapis.com/v1/people/me/connections?pageSize=1000&personFields=${fields}${nextPageToken ? `&pageToken=${nextPageToken}` : ''}`;
-        
-        const contactsRes = await authClient.request({ url });
-        const data = contactsRes.data;
-
-        if (data.connections) {
-          allConnections = allConnections.concat(data.connections);
+      if (demoData) {
+        stream.progress('Loading demo data...');
+        allConnections = demoData.pages
+          ? demoData.pages.flatMap((page) => page.connections || [])
+          : demoData.connections || [];
+      } else {
+        const { OAuth2Client } = await import('google-auth-library');
+        let authClient: any;
+        if (clientId && clientSecret && tokens) {
+          authClient = new OAuth2Client(clientId, clientSecret);
+          authClient.setCredentials(tokens);
+        } else {
+          authClient = new OAuth2Client();
+          authClient.setCredentials({ access_token: token });
         }
-        nextPageToken = data.nextPageToken || '';
-        
-        stream.progress(`Fetched ${allConnections.length} contacts...`);
-      } while (nextPageToken);
+
+        stream.progress('Connecting to Google People API...');
+        const fields = 'names,emailAddresses,photos,biographies,urls,organizations';
+        let nextPageToken = '';
+
+        do {
+          const url = `https://people.googleapis.com/v1/people/me/connections?pageSize=1000&personFields=${fields}${nextPageToken ? `&pageToken=${nextPageToken}` : ''}`;
+          
+          const contactsRes = await authClient.request({ url });
+          const data = contactsRes.data;
+
+          if (data.connections) {
+            allConnections = allConnections.concat(data.connections);
+          }
+          nextPageToken = data.nextPageToken || '';
+          
+          stream.progress(`Fetched ${allConnections.length} contacts...`);
+        } while (nextPageToken);
+      }
 
       let insertedCount = 0;
       let updatedCount = 0;
@@ -1266,13 +1478,13 @@ async function startServer() {
 
 
   // Vite middleware for development
-  if (process.env.NODE_ENV !== "production") {
+  if (process.env.CONTACTBRIDGE_DISABLE_FRONTEND !== '1' && process.env.NODE_ENV !== "production") {
     const vite = await createViteServer({
       server: { middlewareMode: true },
       appType: "spa",
     });
     app.use(vite.middlewares);
-  } else {
+  } else if (process.env.CONTACTBRIDGE_DISABLE_FRONTEND !== '1') {
     const distPath = path.join(process.cwd(), 'dist');
     app.use(express.static(distPath));
     app.get('*', (req, res) => {

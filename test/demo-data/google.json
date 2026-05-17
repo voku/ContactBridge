@@ -1,0 +1,78 @@
+{
+  "pages": [
+    {
+      "connections": [
+        {
+          "resourceName": "people/cathy-demo",
+          "etag": "%EgUBAQc=",
+          "names": [
+            {
+              "displayName": "Cathy Demo",
+              "givenName": "Cathy",
+              "familyName": "Demo"
+            }
+          ],
+          "emailAddresses": [
+            {
+              "value": "cathy@example.com"
+            }
+          ],
+          "photos": [
+            {
+              "url": "https://lh3.googleusercontent.com/a-/cathy-demo",
+              "default": false
+            }
+          ],
+          "biographies": [
+            {
+              "value": "Partnerships manager"
+            }
+          ],
+          "urls": [
+            {
+              "value": "https://example.com/cathy"
+            }
+          ]
+        }
+      ],
+      "nextPageToken": "page-2"
+    },
+    {
+      "connections": [
+        {
+          "resourceName": "people/louis-demo",
+          "etag": "%EgUBAQg=",
+          "names": [
+            {
+              "displayName": "Louis Demo",
+              "givenName": "Louis",
+              "familyName": "Demo"
+            }
+          ],
+          "emailAddresses": [
+            {
+              "value": "louis@example.com"
+            }
+          ],
+          "photos": [
+            {
+              "url": "https://lh3.googleusercontent.com/a-/louis-demo",
+              "default": false
+            }
+          ],
+          "organizations": [
+            {
+              "title": "Engineering Manager",
+              "name": "Example Co"
+            }
+          ],
+          "urls": [
+            {
+              "value": "https://example.com/louis"
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

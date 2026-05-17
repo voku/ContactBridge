@@ -1,0 +1,44 @@
+{
+  "followersResponse": {
+    "subject": {
+      "did": "did:plc:contactbridge-demo",
+      "handle": "contactbridge-demo.bsky.social",
+      "displayName": "ContactBridge Demo"
+    },
+    "followers": [
+      {
+        "did": "did:plc:alice-demo",
+        "handle": "alice-demo.bsky.social",
+        "displayName": "Alice Demo",
+        "avatar": "https://cdn.bsky.app/img/avatar/plain/did:plc:alice-demo/bafkreialicedemo@jpeg",
+        "description": "Design systems lead",
+        "viewer": {
+          "followedBy": "at://did:plc:contactbridge-demo/app.bsky.graph.follow/alice-follow",
+          "following": null
+        }
+      }
+    ],
+    "cursor": "followers-cursor-demo"
+  },
+  "followsResponse": {
+    "subject": {
+      "did": "did:plc:contactbridge-demo",
+      "handle": "contactbridge-demo.bsky.social",
+      "displayName": "ContactBridge Demo"
+    },
+    "follows": [
+      {
+        "did": "did:plc:bob-demo",
+        "handle": "bob-demo.bsky.social",
+        "displayName": "Bob Demo",
+        "avatar": "https://cdn.bsky.app/img/avatar/plain/did:plc:bob-demo/bafkreibobdemo@jpeg",
+        "description": "Backend engineer",
+        "viewer": {
+          "following": "at://did:plc:contactbridge-demo/app.bsky.graph.follow/bob-follow",
+          "followedBy": null
+        }
+      }
+    ],
+    "cursor": "follows-cursor-demo"
+  }
+}

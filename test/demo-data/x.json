@@ -1,0 +1,37 @@
+{
+  "meResponse": {
+    "data": {
+      "id": "2244994945",
+      "name": "ContactBridge Demo",
+      "username": "contactbridge_demo"
+    }
+  },
+  "followersResponse": {
+    "data": [
+      {
+        "id": "1450081635559428107",
+        "username": "eve_demo",
+        "name": "Eve Demo",
+        "profile_image_url": "https://pbs.twimg.com/profile_images/1450081635559428107/eve_demo_normal.jpg",
+        "description": "AI researcher"
+      }
+    ],
+    "meta": {
+      "result_count": 1
+    }
+  },
+  "followingResponse": {
+    "data": [
+      {
+        "id": "1605503331234567890",
+        "username": "frank_demo",
+        "name": "Frank Demo",
+        "profile_image_url": "https://pbs.twimg.com/profile_images/1605503331234567890/frank_demo_normal.jpg",
+        "description": "Developer advocate"
+      }
+    ],
+    "meta": {
+      "result_count": 1
+    }
+  }
+}

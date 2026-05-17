@@ -1,0 +1,31 @@
+{
+  "user": {
+    "login": "contactbridge-demo",
+    "id": 999999,
+    "avatar_url": "https://avatars.githubusercontent.com/u/999999?v=4"
+  },
+  "followersResponse": [
+    {
+      "login": "ivan-demo",
+      "id": 101,
+      "node_id": "MDQ6VXNlcjEwMQ==",
+      "avatar_url": "https://avatars.githubusercontent.com/u/101?v=4",
+      "url": "https://api.github.com/users/ivan-demo",
+      "html_url": "https://github.com/ivan-demo",
+      "type": "User",
+      "site_admin": false
+    }
+  ],
+  "followingResponse": [
+    {
+      "login": "judy-demo",
+      "id": 102,
+      "node_id": "MDQ6VXNlcjEwMg==",
+      "avatar_url": "https://avatars.githubusercontent.com/u/102?v=4",
+      "url": "https://api.github.com/users/judy-demo",
+      "html_url": "https://github.com/judy-demo",
+      "type": "User",
+      "site_admin": false
+    }
+  ]
+}
