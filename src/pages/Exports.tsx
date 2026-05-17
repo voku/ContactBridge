@@ -17,6 +17,7 @@ const getProfileUrl = (p: any) => {
     case 'x': case 'twitter': return `https://x.com/${p.handle}`;
     case 'bluesky': return `https://bsky.app/profile/${p.handle}`;
     case 'linkedin': return `https://linkedin.com/in/${p.handle}`;
+    case 'xing': return `https://www.xing.com/profile/${p.handle}`;
     default: return '#';
   }
 };

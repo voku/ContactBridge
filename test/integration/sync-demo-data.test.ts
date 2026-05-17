@@ -410,6 +410,41 @@ test('manual capture reuses the same candidate for the same normalized profile',
   assert.equal(candidates[0]?.profiles[0]?.bio, 'Design lead');
 });
 
+test('manual capture supports xing profile URLs', async (t) => {
+  const server = await startServer();
+  t.after(() => stopServer(server));
+
+  const firstCapture = await postJson<{ id: string; status: string }>(server.baseUrl, '/api/capture/manual', {
+    source: 'xing',
+    profileUrl: 'https://www.xing.com/profile/Jane_Demo',
+    displayName: 'Jane Demo',
+    headline: 'Product designer'
+  });
+
+  const secondCapture = await postJson<{ id: string; status: string }>(server.baseUrl, '/api/capture/manual', {
+    source: 'xing',
+    profileUrl: 'https://www.xing.com/profile/jane_demo',
+    displayName: 'Jane D.',
+    headline: 'Design lead'
+  });
+
+  assert.equal(secondCapture.id, firstCapture.id);
+  assert.equal(secondCapture.status, 'pending');
+
+  const candidates = await getJson<Array<{
+    id: string;
+    profiles: Array<{ sourceType: string; profileUrl: string | null; displayName: string | null; bio: string | null }>;
+  }>>(server.baseUrl, '/api/candidates');
+
+  assert.equal(candidates.length, 1);
+  assert.equal(candidates[0]?.id, firstCapture.id);
+  assert.equal(candidates[0]?.profiles.length, 1);
+  assert.equal(candidates[0]?.profiles[0]?.sourceType, 'xing');
+  assert.equal(candidates[0]?.profiles[0]?.profileUrl, 'https://www.xing.com/profile/jane_demo');
+  assert.equal(candidates[0]?.profiles[0]?.displayName, 'Jane D.');
+  assert.equal(candidates[0]?.profiles[0]?.bio, 'Design lead');
+});
+
 test('merging candidates preserves notes and combined profiles', async (t) => {
   const server = await startServer();
   t.after(() => stopServer(server));

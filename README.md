@@ -1,10 +1,11 @@
 # ContactBridge
 
-ContactBridge is a privacy-first social contact hub. It imports profiles from supported sources, groups them into reviewable candidates, and exports approved contacts as CSV, JSON, or vCard files.
+ContactBridge is a privacy-first social contact hub. It imports profiles from supported sources, groups them into reviewable candidates, supports manual profile capture from XING, and exports approved contacts as CSV, JSON, or vCard files.
 
 ## Features
 
 - Import contacts from Bluesky, GitHub, Google Contacts, LinkedIn, Mastodon, and X
+- Capture public profiles manually from XING with the browser extension
 - Review and merge candidate identities before approving them
 - Export approved contacts in CSV, JSON, and VCF formats
 - Optional browser extension for manual profile capture
@@ -123,7 +124,7 @@ If you fork this repository, update `.github/workflows/deploy-pages.yml` and the
 
 ## Browser extension
 
-The Chrome extension lives in `extension/`.
+The Chrome extension lives in `extension/` and supports manual capture from LinkedIn, X, Bluesky, and XING.
 
 To load it locally:
 
