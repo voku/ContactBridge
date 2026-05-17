@@ -278,10 +278,11 @@ test('sync preserves both relationship directions for mutual Bluesky profiles', 
 
   const blueskyFixturePath = path.join(overrideDemoDataDir, 'bluesky.json');
   const blueskyFixture = JSON.parse(await fs.readFile(blueskyFixturePath, 'utf8'));
+  const mutualProfile = blueskyFixture.followersResponse.followers[0];
   blueskyFixture.followsResponse.follows.push({
-    ...blueskyFixture.followersResponse.followers[0],
+    ...mutualProfile,
     viewer: {
-      followedBy: blueskyFixture.followersResponse.followers[0].viewer.followedBy,
+      followedBy: mutualProfile.viewer.followedBy,
       following: 'at://did:plc:contactbridge-demo/app.bsky.graph.follow/alice-mutual-follow'
     }
   });
@@ -311,10 +312,10 @@ test('sync preserves both relationship directions for mutual Bluesky profiles', 
     FROM relationship_edges
     WHERE source_account_id = ?
       AND social_profile_id = (
-        SELECT id FROM social_profiles WHERE source_type = 'bluesky' AND source_profile_id = 'did:plc:alice-demo'
+        SELECT id FROM social_profiles WHERE source_type = 'bluesky' AND source_profile_id = ?
       )
     ORDER BY relation_type
-  `).all(sourceAccount.id) as Array<{ relationType: string }>;
+  `).all(sourceAccount.id, mutualProfile.did) as Array<{ relationType: string }>;
 
   assert.deepEqual(relationships.map((relationship) => relationship.relationType), ['followed_by', 'follows']);
 });
