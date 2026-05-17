@@ -268,6 +268,57 @@ for (const syncCase of syncCases) {
   });
 }
 
+test('sync preserves both relationship directions for mutual Bluesky profiles', async (t) => {
+  const overrideDemoDataRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'contactbridge-demo-'));
+  const overrideDemoDataDir = path.join(overrideDemoDataRoot, 'fixtures');
+  await fs.cp(demoDataDir, overrideDemoDataDir, { recursive: true });
+  t.after(async () => {
+    await fs.rm(overrideDemoDataRoot, { recursive: true, force: true });
+  });
+
+  const blueskyFixturePath = path.join(overrideDemoDataDir, 'bluesky.json');
+  const blueskyFixture = JSON.parse(await fs.readFile(blueskyFixturePath, 'utf8'));
+  blueskyFixture.followsResponse.follows.push({
+    ...blueskyFixture.followersResponse.followers[0],
+    viewer: {
+      followedBy: blueskyFixture.followersResponse.followers[0].viewer.followedBy,
+      following: 'at://did:plc:contactbridge-demo/app.bsky.graph.follow/alice-mutual-follow'
+    }
+  });
+  await fs.writeFile(blueskyFixturePath, JSON.stringify(blueskyFixture, null, 2));
+
+  const server = await startServer({ demoDataDir: overrideDemoDataDir });
+  t.after(() => stopServer(server));
+
+  const sourceAccount = await postJson<{ id: string }>(server.baseUrl, '/api/source-accounts', {
+    sourceType: 'bluesky',
+    accountIdentifier: 'bluesky-demo-account',
+    displayName: 'bluesky demo',
+    authStatus: 'pending'
+  });
+
+  await postSync<{ success: boolean }>(server.baseUrl, '/api/sync/bluesky', {
+    sourceAccountId: sourceAccount.id,
+    identifier: 'demo.bsky.social',
+    password: 'demo-app-password'
+  });
+
+  const sqlite = new Database(server.dbPath);
+  t.after(() => sqlite.close());
+
+  const relationships = sqlite.prepare(`
+    SELECT relation_type AS relationType
+    FROM relationship_edges
+    WHERE source_account_id = ?
+      AND social_profile_id = (
+        SELECT id FROM social_profiles WHERE source_type = 'bluesky' AND source_profile_id = 'did:plc:alice-demo'
+      )
+    ORDER BY relation_type
+  `).all(sourceAccount.id) as Array<{ relationType: string }>;
+
+  assert.deepEqual(relationships.map((relationship) => relationship.relationType), ['followed_by', 'follows']);
+});
+
 test('manual captures stay reviewable until approved and preserve notes', async (t) => {
   const server = await startServer();
   t.after(() => stopServer(server));

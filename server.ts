@@ -777,6 +777,7 @@ async function startServer() {
 
       // Normalize
       const processProfile = (p: any, relation: string) => {
+        const existing = allProfilesMap.get(p.did);
         allProfilesMap.set(p.did, {
           sourceProfileId: p.did,
           handle: p.handle,
@@ -784,14 +785,13 @@ async function startServer() {
           avatarUrl: p.avatar,
           bio: p.description,
           rawJson: JSON.stringify(p),
-          relation,
+          relations: existing ? Array.from(new Set([...existing.relations, relation])) : [relation],
         });
       };
 
       stream.progress('Processing profiles...');
       followers.forEach(p => processProfile(p, 'followed_by'));
       follows.forEach(p => processProfile(p, 'follows'));
-      // Note: for ones that are mutually following, 'follows' might overwrite 'followed_by', which is fine for MVP
 
       let insertedCount = 0;
       let updatedCount = 0;
@@ -834,14 +834,16 @@ async function startServer() {
            updatedCount++;
         }
 
-        db.insert(schema.relationshipEdges).values({
-          id: uuidv4(),
-          sourceAccountId,
-          socialProfileId: profileIdToUse,
-          relationType: data.relation,
-          observedAt: now,
-          syncJobId
-        }).run();
+        for (const relation of data.relations) {
+          db.insert(schema.relationshipEdges).values({
+            id: uuidv4(),
+            sourceAccountId,
+            socialProfileId: profileIdToUse,
+            relationType: relation,
+            observedAt: now,
+            syncJobId
+          }).run();
+        }
 
         // Create contact candidate if it doesn't have one
         assignProfileToCandidate(profileIdToUse as string, data.displayName, data.handle, now);
@@ -936,6 +938,7 @@ async function startServer() {
       const allProfilesMap = new Map();
 
       const processProfile = (p: any, relation: string) => {
+        const existing = allProfilesMap.get(p.acct);
         allProfilesMap.set(p.acct, {
           sourceProfileId: p.id,
           handle: p.acct,
@@ -943,7 +946,7 @@ async function startServer() {
           avatarUrl: p.avatar,
           bio: p.note ? p.note.replace(/<[^>]*>?/gm, '') : '', // strip HTML
           rawJson: JSON.stringify(p),
-          relation,
+          relations: existing ? Array.from(new Set([...existing.relations, relation])) : [relation],
         });
       };
 
@@ -991,14 +994,16 @@ async function startServer() {
            updatedCount++;
         }
 
-        db.insert(schema.relationshipEdges).values({
-          id: uuidv4(),
-          sourceAccountId,
-          socialProfileId: profileIdToUse,
-          relationType: data.relation,
-          observedAt: now,
-          syncJobId
-        }).run();
+        for (const relation of data.relations) {
+          db.insert(schema.relationshipEdges).values({
+            id: uuidv4(),
+            sourceAccountId,
+            socialProfileId: profileIdToUse,
+            relationType: relation,
+            observedAt: now,
+            syncJobId
+          }).run();
+        }
 
         assignProfileToCandidate(profileIdToUse as string, data.displayName, data.handle, now);
       }
@@ -1251,6 +1256,7 @@ async function startServer() {
       const allProfilesMap = new Map();
 
       const processProfile = (p: any, relation: string) => {
+        const existing = allProfilesMap.get(p.id);
         allProfilesMap.set(p.id, {
           sourceProfileId: p.id,
           handle: p.username,
@@ -1258,7 +1264,7 @@ async function startServer() {
           avatarUrl: p.profile_image_url,
           bio: p.description,
           rawJson: JSON.stringify(p),
-          relation,
+          relations: existing ? Array.from(new Set([...existing.relations, relation])) : [relation],
         });
       };
 
@@ -1306,14 +1312,16 @@ async function startServer() {
            updatedCount++;
         }
 
-        db.insert(schema.relationshipEdges).values({
-          id: uuidv4(),
-          sourceAccountId,
-          socialProfileId: profileIdToUse,
-          relationType: data.relation,
-          observedAt: now,
-          syncJobId
-        }).run();
+        for (const relation of data.relations) {
+          db.insert(schema.relationshipEdges).values({
+            id: uuidv4(),
+            sourceAccountId,
+            socialProfileId: profileIdToUse,
+            relationType: relation,
+            observedAt: now,
+            syncJobId
+          }).run();
+        }
 
         assignProfileToCandidate(profileIdToUse as string, data.displayName, data.handle, now);
       }
