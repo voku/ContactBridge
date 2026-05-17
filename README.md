@@ -83,9 +83,8 @@ Important:
 The workflow uses:
 
 - `VITE_BASE_PATH=/ContactBridge/`
-- `VITE_SITE_URL=https://voku.github.io/ContactBridge/`
 
-If you fork this repository, update those values in `/home/runner/work/ContactBridge/ContactBridge/.github/workflows/deploy-pages.yml`.
+If you fork this repository, update `/home/runner/work/ContactBridge/ContactBridge/.github/workflows/deploy-pages.yml` and the canonical social URLs in `/home/runner/work/ContactBridge/ContactBridge/index.html`.
 
 ## Browser extension
 

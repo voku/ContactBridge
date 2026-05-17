@@ -37,7 +37,6 @@ jobs:
       - name: Build frontend
         env:
           VITE_BASE_PATH: /ContactBridge/
-          VITE_SITE_URL: https://voku.github.io/ContactBridge/
         run: npm run build:client
 
       - name: Configure Pages
