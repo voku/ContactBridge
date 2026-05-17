@@ -177,10 +177,10 @@ document.addEventListener('DOMContentLoaded', () => {
   }
 
   function renderProfileData(profile) {
-    profileDataDiv.textContent = '';
-    appendProfileRow('Source', profile.source || 'unknown', { capitalize: true });
-    appendProfileRow('Name', profile.displayName || 'Unknown');
-    appendProfileRow('Handle', profile.handle ? `@${profile.handle}` : '—');
+    profileDataDiv.replaceChildren();
+    appendProfileRow('Source', profile.source || 'Not available', { capitalize: true });
+    appendProfileRow('Name', profile.displayName || 'Not available');
+    appendProfileRow('Handle', profile.handle ? `@${profile.handle}` : 'Not available');
 
     if (profile.headline) {
       appendProfileRow('', profile.headline, { muted: true, marginTop: '12px' });

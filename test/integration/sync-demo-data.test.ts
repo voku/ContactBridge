@@ -297,17 +297,16 @@ test('manual captures stay reviewable until approved and preserve notes', async 
     notes: 'Met at FOSDEM'
   });
 
-  candidates = await getJson<Array<{
+  const updatedCandidates = await getJson<Array<{
     id: string;
     status: string;
     notes: string | null;
   }>>(server.baseUrl, '/api/candidates');
 
-  assert.deepEqual(candidates, [{
-    id: captureResult.id,
-    status: 'approved',
-    notes: 'Met at FOSDEM'
-  }]);
+  assert.equal(updatedCandidates.length, 1);
+  assert.equal(updatedCandidates[0]?.id, captureResult.id);
+  assert.equal(updatedCandidates[0]?.status, 'approved');
+  assert.equal(updatedCandidates[0]?.notes, 'Met at FOSDEM');
 
   const dashboard = await getJson<{ totalCandidates: number; approvedContacts: number; changedProfiles: number; failedSyncJobs: number }>(
     server.baseUrl,

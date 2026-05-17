@@ -444,7 +444,7 @@ async function startServer() {
             }
           }
         }
-      })();
+      });
       res.json({ success: true });
     } catch (e: any) {
       console.error("Failed to delete source account:", e);
@@ -536,11 +536,11 @@ async function startServer() {
   });
   
   app.get("/api/dashboard", (req, res) => {
-    const totalCandidates = db.select().from(schema.contactCandidates).where(eq(schema.contactCandidates.status, 'pending')).all().length;
+    const pendingCandidates = db.select().from(schema.contactCandidates).where(eq(schema.contactCandidates.status, 'pending')).all().length;
     const approvedContacts = db.select().from(schema.contactCandidates).where(eq(schema.contactCandidates.status, 'approved')).all().length;
     const totalProfiles = db.select().from(schema.socialProfiles).all().length;
     const failedSyncJobs = db.select().from(schema.syncJobs).where(eq(schema.syncJobs.status, 'failed')).all().length;
-    res.json({ totalCandidates, approvedContacts, changedProfiles: totalProfiles, failedSyncJobs });
+    res.json({ totalCandidates: pendingCandidates, approvedContacts, changedProfiles: totalProfiles, failedSyncJobs });
   });
 
   app.get("/api/dashboard/sync-jobs", (req, res) => {
@@ -943,7 +943,7 @@ async function startServer() {
         </html>
       `);
     } catch (e: any) {
-      res.status(500).send(`X OAuth error: ${e.message}`);
+      res.status(500).json({ error: e.message || 'X OAuth error' });
     }
   });
 
@@ -1009,7 +1009,7 @@ async function startServer() {
         </html>
       `);
     } catch (e: any) {
-      res.status(500).send(`Google OAuth error: ${e.message}`);
+      res.status(500).json({ error: e.message || 'Google OAuth error' });
     }
   });
 
@@ -1664,7 +1664,7 @@ async function startServer() {
             sourceType: source,
             sourceProfileId,
             handle: handle || null,
-            displayName: displayName || handle || 'Unknown',
+            displayName: displayName || handle,
             profileUrl: normalizedProfileUrl,
             bio: headline || null,
             rawPublicPayloadJson: JSON.stringify(req.body),
@@ -1695,7 +1695,7 @@ async function startServer() {
           id: candidate.id,
           status: candidate.status || 'pending'
         };
-      })();
+      });
 
       res.json({ success: true, ...captureResult });
     } catch (e: any) {
