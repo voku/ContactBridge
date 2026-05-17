@@ -11,6 +11,7 @@ const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..'
 const demoDataDir = path.join(repoRoot, 'test', 'demo-data');
 const MAX_HEALTH_CHECK_ATTEMPTS = 50;
 const HEALTH_CHECK_INTERVAL_MS = 200;
+const SERVER_SHUTDOWN_TIMEOUT_MS = 5_000;
 
 type SyncCase = {
   name: string;
@@ -146,10 +147,15 @@ const startServer = async (): Promise<ServerHandle> => {
 const stopServer = async ({ process, tempDir }: ServerHandle) => {
   if (!process.killed) {
     process.kill('SIGTERM');
-    await Promise.race([
-      new Promise<void>((resolve) => process.once('exit', () => resolve())),
-      delay(5_000)
+    const exitedCleanly = await Promise.race([
+      new Promise<boolean>((resolve) => process.once('exit', () => resolve(true))),
+      delay(SERVER_SHUTDOWN_TIMEOUT_MS).then(() => false)
     ]);
+
+    if (!exitedCleanly && !process.killed) {
+      process.kill('SIGKILL');
+      await new Promise<void>((resolve) => process.once('exit', () => resolve()));
+    }
   }
 
   await fs.rm(tempDir, { recursive: true, force: true });

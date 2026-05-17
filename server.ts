@@ -127,6 +127,8 @@ const createRateLimiter = (windowMs: number, maxRequests: number) => {
   };
 };
 
+const LINKEDIN_CONNECTIONS_PROJECTION = '(elements*(to,to~(id,firstName,lastName,headline,profilePicture,publicIdentifier)))';
+
 const normalizeMastodonInstanceUrl = (instance: string) => {
   const candidate = instance.startsWith('http://') || instance.startsWith('https://')
     ? instance
@@ -143,7 +145,7 @@ const normalizeMastodonInstanceUrl = (instance: string) => {
   }
 
   if (net.isIP(hostname)) {
-    // fc00::/7 unique local IPv6 range, which covers both fc00::/8 and fd00::/8 prefixes.
+    // fc00::/7 unique local IPv6 range, matched here by explicitly checking both fc* and fd* prefixes.
     const isUniqueLocalIpv6 = /^(fc|fd)[0-9a-f]{2}:/i.test(hostname);
     // fe80::/10 link-local IPv6 address range.
     const isLinkLocalIpv6 = /^fe[89ab][0-9a-f]:/i.test(hostname);
@@ -1008,7 +1010,7 @@ async function startServer() {
       } else {
         stream.progress('Connecting to API...');
         const connectionsRes = await fetch(
-          `https://api.linkedin.com/v2/connections?q=viewer&start=0&count=100&projection=(elements*(to,to~(id,firstName,lastName,headline,profilePicture,publicIdentifier)))`,
+          `https://api.linkedin.com/v2/connections?q=viewer&start=0&count=100&projection=${encodeURIComponent(LINKEDIN_CONNECTIONS_PROJECTION)}`,
           {
           headers: {
             'Authorization': `Bearer ${token}`,
