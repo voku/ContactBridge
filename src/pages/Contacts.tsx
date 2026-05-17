@@ -77,7 +77,7 @@ const getProfileUrl = (p: ContactProfile) => {
 const CONTACT_FILTER_LABELS: Record<ContactFilterKey, string> = {
   all: 'All',
   mutual: 'Mutuals',
-  followedBy: 'Follow you',
+  followedBy: 'Follows you',
   follows: 'You follow',
   connection: 'LinkedIn',
   contact: 'Address book',
@@ -273,11 +273,11 @@ export default function Contacts() {
   const handleBulkExportVcf = () => {
     if (selectedIds.size === 0) return;
       const selectedContacts = contacts.filter(c => selectedIds.has(c.id));
-      const content = selectedContacts.map((c: any) => {
+      const content = selectedContacts.map((c) => {
         let vcard = 'BEGIN:VCARD\r\nVERSION:3.0\r\n';
         vcard += `FN:${c.canonicalName || 'Unknown'}\r\n`;
         vcard += `N:${c.canonicalName || 'Unknown'};;;;\r\n`;
-        c.profiles.forEach((p: any) => {
+        c.profiles.forEach((p) => {
           const url = getProfileUrl(p);
           if (url && url !== '#') {
             vcard += `URL;type=${p.sourceType}:${url}\r\n`;
@@ -452,11 +452,11 @@ export default function Contacts() {
                   </div>
                 </div>
                 {(() => {
-                   const bio = c.profiles.find((p) => p.bio)?.bio;
-                   if (!bio) return null;
-                   return (
-                     <p className="text-sm text-gray-500 line-clamp-3 text-ellipsis overflow-hidden mt-4 px-2" title={bio}>
-                       {bio}
+                  const bio = c.profiles.find((p) => p.bio)?.bio;
+                  if (!bio) return null;
+                  return (
+                    <p className="text-sm text-gray-500 line-clamp-3 text-ellipsis overflow-hidden mt-4 px-2" title={bio}>
+                      {bio}
                     </p>
                   );
                 })()}
