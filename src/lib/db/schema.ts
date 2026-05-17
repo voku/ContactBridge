@@ -6,6 +6,7 @@ export const sourceAccounts = sqliteTable('source_accounts', {
   accountIdentifier: text('account_identifier'),
   displayName: text('display_name'),
   authStatus: text('auth_status'),
+  authData: text('auth_data'),
   createdAt: integer('created_at', { mode: 'timestamp' }),
   updatedAt: integer('updated_at', { mode: 'timestamp' })
 });
