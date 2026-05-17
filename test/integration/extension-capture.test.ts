@@ -74,10 +74,10 @@ test('extractProfileFromDocument reuses shared selectors for supported networks'
     source: 'xing'
   });
 
-  const xingTitleFallback = extensionApi.extractProfileFromDocument(createDocument({}, 'Jane Example | XING'),
+  const xingProfileTitleOnlyFallback = extensionApi.extractProfileFromDocument(createDocument({}, 'Jane Example | XING'),
     'https://www.xing.com/profile/Jane_Example');
 
-  assert.deepEqual(xingTitleFallback, {
+  assert.deepEqual(xingProfileTitleOnlyFallback, {
     displayName: 'Jane Example',
     handle: 'Jane_Example',
     headline: '',
