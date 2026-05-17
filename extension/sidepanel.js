@@ -38,15 +38,32 @@ document.addEventListener('DOMContentLoaded', () => {
       
       const tab = tabs[0];
       const url = tab.url || '';
-      
-      if (url.includes('linkedin.com/in/') || url.includes('x.com/') || url.includes('twitter.com/') || url.includes('bsky.app/profile/') || url.includes('xing.com/profile/')) {
-        const origin = new URL(url).origin + '/*';
+
+      let parsedUrl;
+      try {
+        parsedUrl = new URL(url);
+      } catch {
+        profileDataDiv.innerHTML = '<p class="muted">Navigate to a supported profile (LinkedIn, X, Bluesky, XING) to capture.</p>';
+        captureBtn.disabled = true;
+        return;
+      }
+
+      const hostname = parsedUrl.hostname.toLowerCase();
+      const pathname = parsedUrl.pathname;
+      const isSupportedProfile =
+        (/(^|\.)linkedin\.com$/.test(hostname) && pathname.startsWith('/in/')) ||
+        ((/(^|\.)x\.com$/.test(hostname) || /(^|\.)twitter\.com$/.test(hostname)) && pathname !== '/') ||
+        (hostname === 'bsky.app' && pathname.startsWith('/profile/')) ||
+        (/(^|\.)xing\.com$/.test(hostname) && pathname.startsWith('/profile/'));
+
+      if (isSupportedProfile) {
+        const origin = parsedUrl.origin + '/*';
         
         chrome.permissions.contains({ origins: [origin] }, (hasPermission) => {
           if (hasPermission) {
             extractData(tab.id);
           } else {
-            profileDataDiv.innerHTML = `<p class="muted">Click below to allow access to ${new URL(url).hostname} and capture this profile.</p>`;
+            profileDataDiv.innerHTML = `<p class="muted">Click below to allow access to ${parsedUrl.hostname} and capture this profile.</p>`;
             captureBtn.textContent = 'Grant Access & Capture';
             captureBtn.disabled = false;
             captureBtn.onclick = () => {
