@@ -78,21 +78,7 @@ document.addEventListener('DOMContentLoaded', () => {
       chrome.tabs.sendMessage(tabId, { action: 'get_profile' }, (response) => {
         if (response && response.source !== 'unknown') {
           currentProfile = response;
-          profileDataDiv.innerHTML = `
-            <div class="data-row">
-              <div class="data-label">Source</div>
-              <div class="data-value" style="text-transform: capitalize;">${response.source}</div>
-            </div>
-            <div class="data-row">
-              <div class="data-label">Name</div>
-              <div class="data-value">${response.displayName}</div>
-            </div>
-            <div class="data-row">
-              <div class="data-label">Handle</div>
-              <div class="data-value">@${response.handle}</div>
-            </div>
-            ${response.headline ? `<div class="data-row" style="margin-top: 12px;"><div class="data-value" style="color: #4b5563; font-size: 0.8rem;">${response.headline}</div></div>` : ''}
-          `;
+          renderProfileData(response);
           captureBtn.disabled = false;
           captureBtn.textContent = 'Save this profile';
           captureBtn.onclick = saveProfile;
@@ -128,11 +114,20 @@ document.addEventListener('DOMContentLoaded', () => {
         body: JSON.stringify(payload)
       })
       .then(res => {
-        if (!res.ok) throw new Error('Network error');
+        if (!res.ok) {
+          return res.json()
+            .catch(() => ({ error: 'Network error' }))
+            .then((payload) => {
+              throw new Error(payload.error || 'Network error');
+            });
+        }
         return res.json();
       })
       .then(data => {
-        showStatus('Captured successfully!', false);
+        const message = data.status === 'pending'
+          ? 'Captured successfully. Review it in ContactBridge before approving.'
+          : 'Captured successfully!';
+        showStatus(message, false);
         setTimeout(() => {
           captureBtn.disabled = false;
           captureBtn.textContent = 'Save this profile';
@@ -151,6 +146,45 @@ document.addEventListener('DOMContentLoaded', () => {
     statusDiv.textContent = msg;
     statusDiv.className = isError ? 'error' : '';
     statusDiv.style.display = 'block';
+  }
+
+  function appendProfileRow(label, value, options = {}) {
+    const row = document.createElement('div');
+    row.className = 'data-row';
+    if (options.marginTop) {
+      row.style.marginTop = options.marginTop;
+    }
+
+    if (label) {
+      const labelDiv = document.createElement('div');
+      labelDiv.className = 'data-label';
+      labelDiv.textContent = label;
+      row.appendChild(labelDiv);
+    }
+
+    const valueDiv = document.createElement('div');
+    valueDiv.className = 'data-value';
+    if (options.capitalize) {
+      valueDiv.style.textTransform = 'capitalize';
+    }
+    if (options.muted) {
+      valueDiv.style.color = '#4b5563';
+      valueDiv.style.fontSize = '0.8rem';
+    }
+    valueDiv.textContent = value;
+    row.appendChild(valueDiv);
+    profileDataDiv.appendChild(row);
+  }
+
+  function renderProfileData(profile) {
+    profileDataDiv.replaceChildren();
+    appendProfileRow('Source', profile.source || 'Not available', { capitalize: true });
+    appendProfileRow('Name', profile.displayName || 'Not available');
+    appendProfileRow('Handle', profile.handle ? `@${profile.handle}` : 'Not available');
+
+    if (profile.headline) {
+      appendProfileRow('', profile.headline, { muted: true, marginTop: '12px' });
+    }
   }
 
   chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
