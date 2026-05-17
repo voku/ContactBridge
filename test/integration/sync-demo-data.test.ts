@@ -6,6 +6,7 @@ import path from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
 import test from 'node:test';
 import { fileURLToPath } from 'node:url';
+import Database from 'better-sqlite3';
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
 const demoDataDir = path.join(repoRoot, 'test', 'demo-data');
@@ -70,6 +71,7 @@ type ServerHandle = {
   baseUrl: string;
   process: ChildProcessWithoutNullStreams;
   tempDir: string;
+  dbPath: string;
 };
 
 const getFreePort = async (): Promise<number> => {
@@ -102,7 +104,7 @@ const waitForHealth = async (baseUrl: string) => {
   throw new Error(`Server did not become healthy: ${baseUrl}`);
 };
 
-const startServer = async (): Promise<ServerHandle> => {
+const startServer = async (options: { demoDataDir?: string } = {}): Promise<ServerHandle> => {
   const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), 'contactbridge-it-'));
   const port = await getFreePort();
   const baseUrl = `http://127.0.0.1:${port}`;
@@ -115,7 +117,7 @@ const startServer = async (): Promise<ServerHandle> => {
       env: {
         ...process.env,
         CONTACTBRIDGE_DB_PATH: dbPath,
-        CONTACTBRIDGE_DEMO_DATA_DIR: demoDataDir,
+        CONTACTBRIDGE_DEMO_DATA_DIR: options.demoDataDir || demoDataDir,
         CONTACTBRIDGE_DISABLE_FRONTEND: '1',
         NODE_ENV: 'test',
         PORT: String(port)
@@ -142,7 +144,7 @@ const startServer = async (): Promise<ServerHandle> => {
     throw new Error([(error as Error).message, stderr].filter(Boolean).join('\n'));
   }
 
-  return { baseUrl, process: serverProcess, tempDir };
+  return { baseUrl, process: serverProcess, tempDir, dbPath };
 };
 
 const stopServer = async ({ process, tempDir }: ServerHandle) => {
@@ -321,6 +323,41 @@ test('manual captures stay reviewable until approved and preserve notes', async 
   });
 });
 
+test('manual capture reuses the same candidate for the same normalized profile', async (t) => {
+  const server = await startServer();
+  t.after(() => stopServer(server));
+
+  const firstCapture = await postJson<{ id: string; status: string }>(server.baseUrl, '/api/capture/manual', {
+    source: 'x',
+    profileUrl: 'https://x.com/Jane-Demo',
+    displayName: 'Jane Demo',
+    handle: 'Jane-Demo',
+    headline: 'Product designer'
+  });
+
+  const secondCapture = await postJson<{ id: string; status: string }>(server.baseUrl, '/api/capture/manual', {
+    source: 'x',
+    profileUrl: 'https://x.com/jane-demo',
+    displayName: 'Jane D.',
+    headline: 'Design lead'
+  });
+
+  assert.equal(secondCapture.id, firstCapture.id);
+  assert.equal(secondCapture.status, 'pending');
+
+  const candidates = await getJson<Array<{
+    id: string;
+    profiles: Array<{ handle: string | null; displayName: string | null; bio: string | null }>;
+  }>>(server.baseUrl, '/api/candidates');
+
+  assert.equal(candidates.length, 1);
+  assert.equal(candidates[0]?.id, firstCapture.id);
+  assert.equal(candidates[0]?.profiles.length, 1);
+  assert.equal(candidates[0]?.profiles[0]?.handle, 'jane-demo');
+  assert.equal(candidates[0]?.profiles[0]?.displayName, 'Jane D.');
+  assert.equal(candidates[0]?.profiles[0]?.bio, 'Design lead');
+});
+
 test('merging candidates preserves notes and combined profiles', async (t) => {
   const server = await startServer();
   t.after(() => stopServer(server));
@@ -362,6 +399,71 @@ test('merging candidates preserves notes and combined profiles', async (t) => {
   assert.deepEqual(candidates[0]?.profiles.map((profile) => profile.sourceType).sort(), ['bluesky', 'x']);
 });
 
+test('re-syncing a source removes stale relationships and orphaned contacts', async (t) => {
+  const overrideDemoDataRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'contactbridge-demo-'));
+  const overrideDemoDataDir = path.join(overrideDemoDataRoot, 'fixtures');
+  await fs.cp(demoDataDir, overrideDemoDataDir, { recursive: true });
+  t.after(async () => {
+    await fs.rm(overrideDemoDataRoot, { recursive: true, force: true });
+  });
+
+  const server = await startServer({ demoDataDir: overrideDemoDataDir });
+  t.after(() => stopServer(server));
+
+  const sourceAccount = await postJson<{ id: string }>(server.baseUrl, '/api/source-accounts', {
+    sourceType: 'github',
+    accountIdentifier: 'github-demo-account',
+    displayName: 'github demo',
+    authStatus: 'pending'
+  });
+
+  await postSync(server.baseUrl, '/api/sync/github', {
+    sourceAccountId: sourceAccount.id,
+    token: 'demo-token'
+  });
+
+  await fs.writeFile(
+    path.join(overrideDemoDataDir, 'github.json'),
+    JSON.stringify({
+      followersResponse: [
+        {
+          login: 'ivan-demo',
+          id: 101,
+          avatar_url: 'https://avatars.githubusercontent.com/u/101?v=4',
+          url: 'https://api.github.com/users/ivan-demo'
+        }
+      ],
+      followingResponse: []
+    }, null, 2)
+  );
+
+  const secondSync = await postSync<{ success: boolean; count: number; insertedCount: number; updatedCount: number }>(
+    server.baseUrl,
+    '/api/sync/github',
+    {
+      sourceAccountId: sourceAccount.id,
+      token: 'demo-token'
+    }
+  );
+
+  assert.equal(secondSync.success, true);
+  assert.equal(secondSync.count, 1);
+
+  const candidates = await getJson<Array<{ canonicalName: string }>>(server.baseUrl, '/api/candidates');
+  assert.deepEqual(candidates.map((candidate) => candidate.canonicalName), ['ivan-demo']);
+
+  const dashboard = await getJson<{ totalCandidates: number; approvedContacts: number; changedProfiles: number; failedSyncJobs: number }>(
+    server.baseUrl,
+    '/api/dashboard'
+  );
+  assert.deepEqual(dashboard, {
+    totalCandidates: 1,
+    approvedContacts: 0,
+    changedProfiles: 1,
+    failedSyncJobs: 0
+  });
+});
+
 test('disconnecting a source account removes imported contacts and profiles', async (t) => {
   const server = await startServer();
   t.after(() => stopServer(server));
@@ -399,6 +501,70 @@ test('disconnecting a source account removes imported contacts and profiles', as
 
   const jobs = await getJson<Array<{ id: string }>>(server.baseUrl, '/api/dashboard/sync-jobs');
   assert.equal(jobs.length, 0);
+});
+
+test('x sync can reuse stored OAuth credentials without exposing auth data', async (t) => {
+  const server = await startServer();
+  t.after(() => stopServer(server));
+
+  const sourceAccount = await postJson<{ id: string }>(server.baseUrl, '/api/source-accounts', {
+    sourceType: 'x',
+    accountIdentifier: 'X OAuth',
+    displayName: 'X (Twitter)',
+    authStatus: 'pending'
+  });
+
+  const sqlite = new Database(server.dbPath);
+  t.after(() => sqlite.close());
+  sqlite.prepare('UPDATE source_accounts SET auth_data = ? WHERE id = ?').run(
+    JSON.stringify({ accessToken: 'stored-demo-token', refreshToken: 'stored-refresh-token' }),
+    sourceAccount.id
+  );
+
+  const syncResult = await postSync<{ success: boolean; count: number }>(server.baseUrl, '/api/sync/x', {
+    sourceAccountId: sourceAccount.id
+  });
+
+  assert.equal(syncResult.success, true);
+  assert.equal(syncResult.count, 2);
+
+  const accounts = await getJson<Array<Record<string, unknown>>>(server.baseUrl, '/api/source-accounts');
+  const account = accounts.find((entry) => entry.id === sourceAccount.id);
+  assert.ok(account);
+  assert.equal('authData' in account, false);
+});
+
+test('google sync can reuse stored OAuth credentials', async (t) => {
+  const server = await startServer();
+  t.after(() => stopServer(server));
+
+  const sourceAccount = await postJson<{ id: string }>(server.baseUrl, '/api/source-accounts', {
+    sourceType: 'google',
+    accountIdentifier: 'Google Contacts',
+    displayName: 'Google',
+    authStatus: 'pending'
+  });
+
+  const sqlite = new Database(server.dbPath);
+  t.after(() => sqlite.close());
+  sqlite.prepare('UPDATE source_accounts SET auth_data = ? WHERE id = ?').run(
+    JSON.stringify({
+      tokens: {
+        access_token: 'stored-google-token',
+        refresh_token: 'stored-google-refresh-token'
+      },
+      clientId: 'demo-google-client',
+      clientSecret: 'demo-google-secret'
+    }),
+    sourceAccount.id
+  );
+
+  const syncResult = await postSync<{ success: boolean; count: number }>(server.baseUrl, '/api/sync/google', {
+    sourceAccountId: sourceAccount.id
+  });
+
+  assert.equal(syncResult.success, true);
+  assert.equal(syncResult.count, 2);
 });
 
 test('erases all stored demo data', async (t) => {

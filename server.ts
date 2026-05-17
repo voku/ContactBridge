@@ -24,6 +24,7 @@ sqlite.exec(`
     account_identifier TEXT,
     display_name TEXT,
     auth_status TEXT,
+    auth_data TEXT,
     created_at INTEGER,
     updated_at INTEGER
   );
@@ -79,6 +80,12 @@ sqlite.exec(`
 
 try {
   sqlite.exec("ALTER TABLE contact_candidates ADD COLUMN notes TEXT;");
+} catch (e) {
+  // column might already exist
+}
+
+try {
+  sqlite.exec("ALTER TABLE source_accounts ADD COLUMN auth_data TEXT;");
 } catch (e) {
   // column might already exist
 }
@@ -173,8 +180,31 @@ const normalizeMastodonInstanceUrl = (instance: string) => {
 };
 
 const MANUAL_CAPTURE_SOURCES = new Set(['bluesky', 'linkedin', 'x']);
+const OAUTH_STATE_TTL_MS = 10 * 60 * 1000;
 
 const trimMaybeString = (value: unknown) => typeof value === 'string' ? value.trim() : '';
+const normalizeProfileHandle = (value: unknown) => trimMaybeString(value).replace(/^@+/, '').toLowerCase();
+
+type SourceAccountAuthData = {
+  accessToken?: string;
+  refreshToken?: string;
+  tokens?: Record<string, unknown>;
+  clientId?: string;
+  clientSecret?: string;
+};
+
+type OAuthStateEntry = {
+  clientId: string;
+  clientSecret: string;
+  popupOrigin: string | null;
+  sourceAccountId: string | null;
+  createdAt: number;
+};
+
+type XOauthStateEntry = OAuthStateEntry & {
+  codeVerifier: string;
+  state: string;
+};
 
 const normalizePopupOrigin = (value: unknown) => {
   const origin = trimMaybeString(value);
@@ -229,6 +259,149 @@ const mergeCandidateNotes = (notes: Array<string | null | undefined>) => {
   return mergedNotes.length > 0 ? mergedNotes.join('\n\n') : null;
 };
 
+const parseSourceAccountAuthData = (authData: string | null | undefined): SourceAccountAuthData | null => {
+  if (!authData) {
+    return null;
+  }
+
+  try {
+    const parsed = JSON.parse(authData);
+    return parsed && typeof parsed === 'object' ? parsed as SourceAccountAuthData : null;
+  } catch {
+    return null;
+  }
+};
+
+const getSourceAccount = (id: string) => db.select().from(schema.sourceAccounts)
+  .where(eq(schema.sourceAccounts.id, id))
+  .get();
+
+const getStoredSourceAccountAuth = (sourceAccountId: string) => {
+  const account = getSourceAccount(sourceAccountId);
+  if (!account) {
+    throw new Error('Source account not found');
+  }
+
+  const authData = parseSourceAccountAuthData(account.authData);
+  return { account, authData };
+};
+
+const storeSourceAccountAuth = (sourceAccountId: string, authData: SourceAccountAuthData) => {
+  db.update(schema.sourceAccounts)
+    .set({
+      authData: JSON.stringify(authData),
+      updatedAt: new Date()
+    })
+    .where(eq(schema.sourceAccounts.id, sourceAccountId))
+    .run();
+};
+
+const pruneExpiredOauthStates = <T extends { createdAt: number }>(store: Map<string, T>) => {
+  const cutoff = Date.now() - OAUTH_STATE_TTL_MS;
+  for (const [state, entry] of store.entries()) {
+    if (entry.createdAt < cutoff) {
+      store.delete(state);
+    }
+  }
+};
+
+const getOauthStateEntry = <T extends { createdAt: number }>(store: Map<string, T>, state: string) => {
+  pruneExpiredOauthStates(store);
+  const entry = store.get(state);
+  if (!entry) {
+    return null;
+  }
+
+  if (entry.createdAt < Date.now() - OAUTH_STATE_TTL_MS) {
+    store.delete(state);
+    return null;
+  }
+
+  return entry;
+};
+
+const normalizeManualCaptureSourceProfileId = (source: string, handle: string, profileUrl: string | null) => {
+  const normalizedHandle = normalizeProfileHandle(handle);
+  if (normalizedHandle) {
+    return normalizedHandle;
+  }
+
+  if (!profileUrl) {
+    return '';
+  }
+
+  const parsedProfileUrl = new URL(profileUrl);
+  const pathSegments = parsedProfileUrl.pathname.split('/').filter(Boolean);
+  if (source === 'linkedin' && pathSegments[0] === 'in' && pathSegments[1]) {
+    return pathSegments[1].toLowerCase();
+  }
+
+  if (source === 'bluesky' && pathSegments[0] === 'profile' && pathSegments[1]) {
+    return pathSegments[1].toLowerCase();
+  }
+
+  if (source === 'x' && pathSegments[0]) {
+    return pathSegments[0].toLowerCase();
+  }
+
+  return profileUrl.toLowerCase();
+};
+
+const cleanupOrphanedProfiles = (socialProfileIds: Iterable<string>) => {
+  for (const socialProfileId of new Set(Array.from(socialProfileIds).filter(Boolean))) {
+    const remainingRelationship = db.select({ id: schema.relationshipEdges.id })
+      .from(schema.relationshipEdges)
+      .where(eq(schema.relationshipEdges.socialProfileId, socialProfileId))
+      .get();
+
+    if (remainingRelationship) {
+      continue;
+    }
+
+    const affectedCandidateIds = db.select({ contactCandidateId: schema.contactCandidateProfiles.contactCandidateId })
+      .from(schema.contactCandidateProfiles)
+      .where(eq(schema.contactCandidateProfiles.socialProfileId, socialProfileId))
+      .all()
+      .map((entry) => entry.contactCandidateId)
+      .filter((candidateId): candidateId is string => Boolean(candidateId));
+
+    db.delete(schema.contactCandidateProfiles)
+      .where(eq(schema.contactCandidateProfiles.socialProfileId, socialProfileId))
+      .run();
+    db.delete(schema.socialProfiles)
+      .where(eq(schema.socialProfiles.id, socialProfileId))
+      .run();
+
+    for (const candidateId of affectedCandidateIds) {
+      const remainingProfile = db.select({ socialProfileId: schema.contactCandidateProfiles.socialProfileId })
+        .from(schema.contactCandidateProfiles)
+        .where(eq(schema.contactCandidateProfiles.contactCandidateId, candidateId))
+        .get();
+
+      if (!remainingProfile) {
+        db.delete(schema.contactCandidates)
+          .where(eq(schema.contactCandidates.id, candidateId))
+          .run();
+      }
+    }
+  }
+};
+
+const clearSourceRelationships = (sourceAccountId: string) => {
+  const relatedProfileIds = db.select({ socialProfileId: schema.relationshipEdges.socialProfileId })
+    .from(schema.relationshipEdges)
+    .where(eq(schema.relationshipEdges.sourceAccountId, sourceAccountId))
+    .all()
+    .map((edge) => edge.socialProfileId)
+    .filter((profileId): profileId is string => Boolean(profileId));
+
+  db.delete(schema.relationshipEdges)
+    .where(eq(schema.relationshipEdges.sourceAccountId, sourceAccountId))
+    .run();
+
+  return relatedProfileIds;
+};
+
 const getLinkedInLocalizedText = (value: any) => {
   if (!value) {
     return '';
@@ -281,6 +454,7 @@ const getLinkedInProfilePictureUrl = (profilePicture: any) => {
 };
 
 function assignProfileToCandidate(profileIdToUse: string, displayName: string, handle: string, now: Date) {
+  const normalizedHandle = normalizeProfileHandle(handle);
   const existingCandidateProfile = db.select().from(schema.contactCandidateProfiles)
     .where(eq(schema.contactCandidateProfiles.socialProfileId, profileIdToUse))
     .get();
@@ -288,9 +462,9 @@ function assignProfileToCandidate(profileIdToUse: string, displayName: string, h
   if (!existingCandidateProfile) {
     let matchedCandidateId = null;
     
-    if (handle) {
+    if (normalizedHandle) {
       const handles = db.select().from(schema.socialProfiles)
-        .where(eq(schema.socialProfiles.handle, handle)).all();
+        .where(eq(schema.socialProfiles.handle, normalizedHandle)).all();
       
       for (const p of handles) {
         if (p.id === profileIdToUse) continue;
@@ -316,14 +490,14 @@ function assignProfileToCandidate(profileIdToUse: string, displayName: string, h
         contactCandidateId: matchedCandidateId,
         socialProfileId: profileIdToUse
       }).run();
-    } else {
-      const candidateId = uuidv4();
-      db.insert(schema.contactCandidates).values({
-        id: candidateId,
-        canonicalName: displayName || handle || 'Unknown',
-        confidenceScore: 50,
-        status: 'pending',
-        createdAt: now,
+      } else {
+        const candidateId = uuidv4();
+        db.insert(schema.contactCandidates).values({
+          id: candidateId,
+          canonicalName: displayName || normalizedHandle || 'Unknown',
+          confidenceScore: 50,
+          status: 'pending',
+          createdAt: now,
         updatedAt: now
       }).run();
 
@@ -369,7 +543,15 @@ async function startServer() {
 
   // Source Accounts
   app.get("/api/source-accounts", (req, res) => {
-    const accounts = db.select().from(schema.sourceAccounts).all();
+    const accounts = db.select({
+      id: schema.sourceAccounts.id,
+      sourceType: schema.sourceAccounts.sourceType,
+      accountIdentifier: schema.sourceAccounts.accountIdentifier,
+      displayName: schema.sourceAccounts.displayName,
+      authStatus: schema.sourceAccounts.authStatus,
+      createdAt: schema.sourceAccounts.createdAt,
+      updatedAt: schema.sourceAccounts.updatedAt
+    }).from(schema.sourceAccounts).all();
     res.json(accounts);
   });
 
@@ -394,56 +576,10 @@ async function startServer() {
     const { id } = req.params;
     try {
       db.transaction(() => {
-        const relatedProfileIds = Array.from(new Set(
-          db.select({ socialProfileId: schema.relationshipEdges.socialProfileId })
-            .from(schema.relationshipEdges)
-            .where(eq(schema.relationshipEdges.sourceAccountId, id))
-            .all()
-            .map((edge) => edge.socialProfileId)
-            .filter((profileId): profileId is string => Boolean(profileId))
-        ));
-
         db.delete(schema.syncJobs).where(eq(schema.syncJobs.sourceAccountId, id)).run();
-        db.delete(schema.relationshipEdges).where(eq(schema.relationshipEdges.sourceAccountId, id)).run();
+        const relatedProfileIds = clearSourceRelationships(id);
         db.delete(schema.sourceAccounts).where(eq(schema.sourceAccounts.id, id)).run();
-
-        for (const socialProfileId of relatedProfileIds) {
-          const remainingRelationship = db.select({ id: schema.relationshipEdges.id })
-            .from(schema.relationshipEdges)
-            .where(eq(schema.relationshipEdges.socialProfileId, socialProfileId))
-            .get();
-
-          if (remainingRelationship) {
-            continue;
-          }
-
-          const affectedCandidateIds = db.select({ contactCandidateId: schema.contactCandidateProfiles.contactCandidateId })
-            .from(schema.contactCandidateProfiles)
-            .where(eq(schema.contactCandidateProfiles.socialProfileId, socialProfileId))
-            .all()
-            .map((entry) => entry.contactCandidateId)
-            .filter((candidateId): candidateId is string => Boolean(candidateId));
-
-          db.delete(schema.contactCandidateProfiles)
-            .where(eq(schema.contactCandidateProfiles.socialProfileId, socialProfileId))
-            .run();
-          db.delete(schema.socialProfiles)
-            .where(eq(schema.socialProfiles.id, socialProfileId))
-            .run();
-
-          for (const candidateId of affectedCandidateIds) {
-            const remainingProfile = db.select({ socialProfileId: schema.contactCandidateProfiles.socialProfileId })
-              .from(schema.contactCandidateProfiles)
-              .where(eq(schema.contactCandidateProfiles.contactCandidateId, candidateId))
-              .get();
-
-            if (!remainingProfile) {
-              db.delete(schema.contactCandidates)
-                .where(eq(schema.contactCandidates.id, candidateId))
-                .run();
-            }
-          }
-        }
+        cleanupOrphanedProfiles(relatedProfileIds);
       });
       res.json({ success: true });
     } catch (e: any) {
@@ -659,6 +795,7 @@ async function startServer() {
 
       let insertedCount = 0;
       let updatedCount = 0;
+      const staleProfileIds = clearSourceRelationships(sourceAccountId);
 
       stream.progress('Merging duplicates in database...');
       for (const [did, data] of allProfilesMap.entries()) {
@@ -710,6 +847,7 @@ async function startServer() {
         assignProfileToCandidate(profileIdToUse as string, data.displayName, data.handle, now);
       }
 
+      cleanupOrphanedProfiles(staleProfileIds);
       db.update(schema.syncJobs).set({ status: 'completed', finishedAt: new Date() }).where(eq(schema.syncJobs.id, syncJobId)).run();
       db.update(schema.sourceAccounts).set({ authStatus: 'connected', updatedAt: new Date() }).where(eq(schema.sourceAccounts.id, sourceAccountId)).run();
 
@@ -815,6 +953,7 @@ async function startServer() {
 
       let insertedCount = 0;
       let updatedCount = 0;
+      const staleProfileIds = clearSourceRelationships(sourceAccountId);
 
       stream.progress('Merging duplicates in database...');
       for (const [handle, data] of allProfilesMap.entries()) {
@@ -864,6 +1003,7 @@ async function startServer() {
         assignProfileToCandidate(profileIdToUse as string, data.displayName, data.handle, now);
       }
 
+      cleanupOrphanedProfiles(staleProfileIds);
       db.update(schema.syncJobs).set({ status: 'completed', finishedAt: new Date() }).where(eq(schema.syncJobs.id, syncJobId)).run();
       db.update(schema.sourceAccounts).set({ authStatus: 'connected', updatedAt: new Date() }).where(eq(schema.sourceAccounts.id, sourceAccountId)).run();
 
@@ -882,30 +1022,39 @@ async function startServer() {
   });
 
 
-  const oauthStore = new Map<string, { codeVerifier: string, state: string, clientId: string, clientSecret: string, popupOrigin: string | null }>();
+  const oauthStore = new Map<string, XOauthStateEntry>();
 
   app.post('/api/auth/x/url', syncRateLimiter, (req, res) => {
     try {
-      const { clientId, clientSecret, popupOrigin } = req.body;
+      const { clientId, clientSecret, popupOrigin, sourceAccountId } = req.body;
       if (!clientId || !clientSecret) {
         throw new Error('Client ID or Client Secret is missing.');
       }
 
+      pruneExpiredOauthStates(oauthStore);
       const client = new TwitterApi({ clientId, clientSecret });
       const redirectUri = getOauthRedirectUri(req, 'x');
       
       const { url, codeVerifier, state } = client.generateOAuth2AuthLink(redirectUri, { scope: ['tweet.read', 'users.read', 'follows.read', 'offline.access'] });
       
-      oauthStore.set(state, { codeVerifier, state, clientId, clientSecret, popupOrigin: normalizePopupOrigin(popupOrigin) });
+      oauthStore.set(state, {
+        codeVerifier,
+        state,
+        clientId,
+        clientSecret,
+        popupOrigin: normalizePopupOrigin(popupOrigin),
+        sourceAccountId: trimMaybeString(sourceAccountId) || null,
+        createdAt: Date.now()
+      });
       res.json({ url });
     } catch (e: any) {
       res.status(500).json({ error: e.message });
     }
   });
 
-  app.get(['/auth/x/callback', '/auth/x/callback/'], async (req, res) => {
+  app.get(['/auth/x/callback', '/auth/x/callback/'], syncRateLimiter, async (req, res) => {
     const { state, code } = req.query;
-    const store = oauthStore.get(state as string);
+    const store = typeof state === 'string' ? getOauthStateEntry(oauthStore, state) : null;
 
     if (!store || !state || !code) {
       return res.status(400).send('Invalid state or code');
@@ -916,7 +1065,7 @@ async function startServer() {
       const redirectUri = getOauthRedirectUri(req, 'x');
       const postMessageOrigin = store.popupOrigin || getAppOrigin(req);
       
-      const { client: loggedClient, accessToken, refreshToken } = await client.loginWithOAuth2({
+      const { accessToken, refreshToken } = await client.loginWithOAuth2({
         code: code as string,
         codeVerifier: store.codeVerifier,
         redirectUri
@@ -924,13 +1073,22 @@ async function startServer() {
 
       oauthStore.delete(state as string);
 
+      if (store.sourceAccountId) {
+        storeSourceAccountAuth(store.sourceAccountId, {
+          accessToken,
+          refreshToken: refreshToken || undefined,
+          clientId: store.clientId,
+          clientSecret: store.clientSecret
+        });
+      }
+
       res.send(`
         <html>
           <body>
             <script>
               if (window.opener) {
                 window.opener.postMessage(
-                  ${serializeForInlineScript({ type: 'OAUTH_AUTH_SUCCESS_X', accessToken })},
+                  ${serializeForInlineScript({ type: 'OAUTH_AUTH_SUCCESS_X', sourceAccountId: store.sourceAccountId })},
                   ${serializeForInlineScript(postMessageOrigin)}
                 );
                 window.close();
@@ -943,18 +1101,20 @@ async function startServer() {
         </html>
       `);
     } catch (e: any) {
+      oauthStore.delete(state as string);
       res.status(500).json({ error: e.message || 'X OAuth error' });
     }
   });
 
-  const googleOauthStore = new Map<string, { clientId: string, clientSecret: string, popupOrigin: string | null }>();
+  const googleOauthStore = new Map<string, OAuthStateEntry>();
 
   app.post('/api/auth/google/url', syncRateLimiter, async (req, res) => {
     try {
-      const { clientId, clientSecret, popupOrigin } = req.body;
+      const { clientId, clientSecret, popupOrigin, sourceAccountId } = req.body;
       if (!clientId || !clientSecret) {
         throw new Error('Client ID or Client Secret is missing.');
       }
+      pruneExpiredOauthStates(googleOauthStore);
       const { OAuth2Client } = await import('google-auth-library');
       const redirectUri = getOauthRedirectUri(req, 'google');
       const client = new OAuth2Client(clientId, clientSecret, redirectUri);
@@ -967,16 +1127,22 @@ async function startServer() {
         state
       });
       
-      googleOauthStore.set(state, { clientId, clientSecret, popupOrigin: normalizePopupOrigin(popupOrigin) });
+      googleOauthStore.set(state, {
+        clientId,
+        clientSecret,
+        popupOrigin: normalizePopupOrigin(popupOrigin),
+        sourceAccountId: trimMaybeString(sourceAccountId) || null,
+        createdAt: Date.now()
+      });
       res.json({ url });
     } catch (e: any) {
       res.status(500).json({ error: e.message });
     }
   });
 
-  app.get(['/auth/google/callback', '/auth/google/callback/'], async (req, res) => {
+  app.get(['/auth/google/callback', '/auth/google/callback/'], syncRateLimiter, async (req, res) => {
     const { state, code } = req.query;
-    const store = googleOauthStore.get(state as string);
+    const store = typeof state === 'string' ? getOauthStateEntry(googleOauthStore, state) : null;
 
     if (!store || !state || !code) {
       return res.status(400).send('Invalid state or code');
@@ -990,13 +1156,21 @@ async function startServer() {
       const postMessageOrigin = store.popupOrigin || getAppOrigin(req);
       googleOauthStore.delete(state as string);
 
+      if (store.sourceAccountId) {
+        storeSourceAccountAuth(store.sourceAccountId, {
+          tokens: tokens as Record<string, unknown>,
+          clientId: store.clientId,
+          clientSecret: store.clientSecret
+        });
+      }
+
       res.send(`
         <html>
           <body>
             <script>
               if (window.opener) {
                 window.opener.postMessage(
-                  ${serializeForInlineScript({ type: 'OAUTH_AUTH_SUCCESS_GOOGLE', tokens })},
+                  ${serializeForInlineScript({ type: 'OAUTH_AUTH_SUCCESS_GOOGLE', sourceAccountId: store.sourceAccountId })},
                   ${serializeForInlineScript(postMessageOrigin)}
                 );
                 window.close();
@@ -1009,12 +1183,13 @@ async function startServer() {
         </html>
       `);
     } catch (e: any) {
+      googleOauthStore.delete(state as string);
       res.status(500).json({ error: e.message || 'Google OAuth error' });
     }
   });
 
   app.post("/api/sync/x", syncRateLimiter, async (req, res) => {
-    const { sourceAccountId, accessToken } = req.body;
+    const { sourceAccountId, accessToken: rawAccessToken } = req.body;
     const syncJobId = uuidv4();
     const now = new Date();
     const stream = createStream(res);
@@ -1034,6 +1209,12 @@ async function startServer() {
         followersResponse?: { data?: any[] },
         followingResponse?: { data?: any[] }
       }>('x');
+      const storedAuth = rawAccessToken ? null : getStoredSourceAccountAuth(sourceAccountId).authData;
+      const accessToken = trimMaybeString(rawAccessToken) || trimMaybeString(storedAuth?.accessToken);
+
+      if (!accessToken) {
+        throw new Error('An X access token is required. Please reconnect your X account.');
+      }
 
       if (demoData) {
         stream.progress('Loading demo data...');
@@ -1087,6 +1268,7 @@ async function startServer() {
 
       let insertedCount = 0;
       let updatedCount = 0;
+      const staleProfileIds = clearSourceRelationships(sourceAccountId);
 
       stream.progress('Merging duplicates in database...');
       for (const [did, data] of allProfilesMap.entries()) {
@@ -1136,6 +1318,7 @@ async function startServer() {
         assignProfileToCandidate(profileIdToUse as string, data.displayName, data.handle, now);
       }
       
+      cleanupOrphanedProfiles(staleProfileIds);
       db.update(schema.syncJobs).set({ status: 'completed', finishedAt: new Date() }).where(eq(schema.syncJobs.id, syncJobId)).run();
       db.update(schema.sourceAccounts).set({ authStatus: 'connected', updatedAt: new Date() }).where(eq(schema.sourceAccounts.id, sourceAccountId)).run();
 
@@ -1207,6 +1390,7 @@ async function startServer() {
 
       let insertedCount = 0;
       let updatedCount = 0;
+      const staleProfileIds = clearSourceRelationships(sourceAccountId);
 
       stream.progress('Merging duplicates in database...');
       for (const p of elements) {
@@ -1269,6 +1453,7 @@ async function startServer() {
         assignProfileToCandidate(profileIdToUse as string, displayName, profileHandle, now);
       }
       
+      cleanupOrphanedProfiles(staleProfileIds);
       db.update(schema.syncJobs).set({ status: 'completed', finishedAt: new Date() }).where(eq(schema.syncJobs.id, syncJobId)).run();
       db.update(schema.sourceAccounts).set({ authStatus: 'connected', updatedAt: new Date() }).where(eq(schema.sourceAccounts.id, sourceAccountId)).run();
 
@@ -1389,6 +1574,7 @@ async function startServer() {
 
       let insertedCount = 0;
       let updatedCount = 0;
+      const staleProfileIds = clearSourceRelationships(sourceAccountId);
       
       stream.progress('Merging duplicates in database...');
       for (const [handle, data] of allProfilesMap.entries()) {
@@ -1440,6 +1626,7 @@ async function startServer() {
         assignProfileToCandidate(profileIdToUse as string, data.displayName, data.handle, now);
       }
 
+      cleanupOrphanedProfiles(staleProfileIds);
       db.update(schema.syncJobs).set({ status: 'completed', finishedAt: new Date() }).where(eq(schema.syncJobs.id, syncJobId)).run();
       db.update(schema.sourceAccounts).set({ authStatus: 'connected', updatedAt: new Date() }).where(eq(schema.sourceAccounts.id, sourceAccountId)).run();
 
@@ -1477,6 +1664,17 @@ async function startServer() {
         pages?: Array<{ connections?: any[] }>,
         connections?: any[]
       }>('google');
+      const storedAuth = (!tokens && !clientId && !clientSecret && !token)
+        ? getStoredSourceAccountAuth(sourceAccountId).authData
+        : null;
+      const resolvedTokens = tokens || storedAuth?.tokens;
+      const resolvedClientId = trimMaybeString(clientId) || trimMaybeString(storedAuth?.clientId);
+      const resolvedClientSecret = trimMaybeString(clientSecret) || trimMaybeString(storedAuth?.clientSecret);
+      const resolvedToken = trimMaybeString(token) || trimMaybeString(storedAuth?.accessToken);
+
+      if (!resolvedTokens && !resolvedToken) {
+        throw new Error('A Google access token is required. Please reconnect Google Contacts.');
+      }
 
       if (demoData) {
         stream.progress('Loading demo data...');
@@ -1486,12 +1684,12 @@ async function startServer() {
       } else {
         const { OAuth2Client } = await import('google-auth-library');
         let authClient: any;
-        if (clientId && clientSecret && tokens) {
-          authClient = new OAuth2Client(clientId, clientSecret);
-          authClient.setCredentials(tokens);
+        if (resolvedClientId && resolvedClientSecret && resolvedTokens) {
+          authClient = new OAuth2Client(resolvedClientId, resolvedClientSecret);
+          authClient.setCredentials(resolvedTokens);
         } else {
           authClient = new OAuth2Client();
-          authClient.setCredentials({ access_token: token });
+          authClient.setCredentials({ access_token: resolvedToken });
         }
 
         stream.progress('Connecting to Google People API...');
@@ -1515,6 +1713,7 @@ async function startServer() {
 
       let insertedCount = 0;
       let updatedCount = 0;
+      const staleProfileIds = clearSourceRelationships(sourceAccountId);
 
       stream.progress('Processing profiles into database...');
       for (const p of allConnections) {
@@ -1582,6 +1781,7 @@ async function startServer() {
         assignProfileToCandidate(profileIdToUse as string, displayName, handle, now);
       }
 
+      cleanupOrphanedProfiles(staleProfileIds);
       db.update(schema.syncJobs).set({ status: 'completed', finishedAt: new Date() }).where(eq(schema.syncJobs.id, syncJobId)).run();
       db.update(schema.sourceAccounts).set({ authStatus: 'connected', updatedAt: new Date() }).where(eq(schema.sourceAccounts.id, sourceAccountId)).run();
 
@@ -1604,9 +1804,8 @@ async function startServer() {
     const source = trimMaybeString(req.body?.source).toLowerCase();
     const displayName = trimMaybeString(req.body?.displayName);
     const headline = trimMaybeString(req.body?.headline);
-    const handle = trimMaybeString(req.body?.handle).replace(/^@+/, '');
+    const handle = normalizeProfileHandle(req.body?.handle);
     const profileUrl = trimMaybeString(req.body?.profileUrl);
-    const sourceProfileId = handle || profileUrl;
 
     if (!MANUAL_CAPTURE_SOURCES.has(source)) {
       return res.status(400).json({ error: 'Unsupported manual capture source.' });
@@ -1614,10 +1813,6 @@ async function startServer() {
 
     if (!displayName && !handle) {
       return res.status(400).json({ error: 'A display name or handle is required.' });
-    }
-
-    if (!sourceProfileId) {
-      return res.status(400).json({ error: 'A handle or profile URL is required.' });
     }
 
     let normalizedProfileUrl: string | null = null;
@@ -1631,6 +1826,11 @@ async function startServer() {
       } catch {
         return res.status(400).json({ error: 'Profile URL must be a valid absolute URL.' });
       }
+    }
+
+    const sourceProfileId = normalizeManualCaptureSourceProfileId(source, handle, normalizedProfileUrl);
+    if (!sourceProfileId) {
+      return res.status(400).json({ error: 'A handle or profile URL is required.' });
     }
 
     const now = new Date();

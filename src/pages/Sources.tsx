@@ -205,10 +205,23 @@ export default function Sources() {
   const handleConnectX = async (e: React.FormEvent) => {
     e.preventDefault();
     try {
+      const accRes = await fetch(apiUrl('/api/source-accounts'), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          sourceType: 'x',
+          accountIdentifier: 'X OAuth',
+          displayName: 'X (Twitter)',
+          authStatus: 'pending'
+        })
+      });
+      const { id } = await accRes.json();
+
       const response = await fetch(apiUrl('/api/auth/x/url'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
+          sourceAccountId: id,
           clientId: xClientId,
           clientSecret: xClientSecret,
           popupOrigin: window.location.origin
@@ -236,28 +249,16 @@ export default function Sources() {
         return;
       }
       if (event.data?.type === 'OAUTH_AUTH_SUCCESS_GOOGLE') {
-        const { tokens } = event.data;
+        const { sourceAccountId } = event.data;
         setIsGoogleDialogOpen(false);
         setGoogleSyncOutcome('');
         
         try {
-          const accRes = await fetch(apiUrl('/api/source-accounts'), {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              sourceType: 'google',
-              accountIdentifier: 'Google Contacts',
-              displayName: 'Google',
-              authStatus: 'pending'
-            })
-          });
-          const { id } = await accRes.json();
-
+          if (!sourceAccountId) {
+            throw new Error('Missing Google source account after OAuth callback.');
+          }
           const syncData = await runSyncTask('/api/sync/google', {
-            sourceAccountId: id,
-            tokens,
-            clientId: googleClientId,
-            clientSecret: googleClientSecret
+            sourceAccountId
           }, setGoogleSyncStatus);
           
           if (syncData.success) {
@@ -277,26 +278,16 @@ export default function Sources() {
       }
 
       if (event.data?.type === 'OAUTH_AUTH_SUCCESS_X') {
-        const { accessToken } = event.data;
+        const { sourceAccountId } = event.data;
         setIsXDialogOpen(false);
         setXSyncOutcome('');
         
         try {
-          const accRes = await fetch(apiUrl('/api/source-accounts'), {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              sourceType: 'x',
-              accountIdentifier: 'X OAuth',
-              displayName: 'X (Twitter)',
-              authStatus: 'pending'
-            })
-          });
-          const { id } = await accRes.json();
-
+          if (!sourceAccountId) {
+            throw new Error('Missing X source account after OAuth callback.');
+          }
           const syncData = await runSyncTask('/api/sync/x', {
-            sourceAccountId: id,
-            accessToken
+            sourceAccountId
           }, setXSyncStatus);
           
           if (syncData.success) {
@@ -461,10 +452,23 @@ export default function Sources() {
   const handleConnectGoogle = async (e: React.FormEvent) => {
     e.preventDefault();
     try {
+      const accRes = await fetch(apiUrl('/api/source-accounts'), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          sourceType: 'google',
+          accountIdentifier: 'Google Contacts',
+          displayName: 'Google',
+          authStatus: 'pending'
+        })
+      });
+      const { id } = await accRes.json();
+
       const response = await fetch(apiUrl('/api/auth/google/url'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
+          sourceAccountId: id,
           clientId: googleClientId,
           clientSecret: googleClientSecret,
           popupOrigin: window.location.origin
