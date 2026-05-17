@@ -79,11 +79,12 @@ const getFreePort = async (): Promise<number> => {
     server.listen(0, '127.0.0.1', () => resolve());
   });
   const address = server.address();
-  const port = typeof address === 'object' && address ? address.port : 0;
-  await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
-  if (port === 0) {
+  if (typeof address !== 'object' || !address || address.port === 0) {
+    await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
     throw new Error('Failed to allocate a test port');
   }
+  const port = address.port;
+  await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
   return port;
 };
 

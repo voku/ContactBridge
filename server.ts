@@ -145,9 +145,9 @@ const normalizeMastodonInstanceUrl = (instance: string) => {
   }
 
   if (net.isIP(hostname)) {
-    // Unique local IPv6 addresses use the fc00::/8 and fd00::/8 prefixes that together form the fc00::/7 range.
+    // Unique local IPv6 addresses live in the fc00::/7 range, which includes both fc00::/8 and fd00::/8.
     const isUniqueLocalIpv6 = /^(fc|fd)[0-9a-f]{2}:/i.test(hostname);
-    // fe80::/10 link-local IPv6 address range.
+    // Matches the fe80::/10 IPv6 link-local range (fe80:: through febf::).
     const isLinkLocalIpv6 = /^fe[89ab][0-9a-f]:/i.test(hostname);
 
     if (
