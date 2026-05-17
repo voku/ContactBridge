@@ -259,8 +259,18 @@ const mergeCandidateNotes = (notes: Array<string | null | undefined>) => {
   return mergedNotes.length > 0 ? mergedNotes.join('\n\n') : null;
 };
 
-const appendUniqueRelation = (relations: string[] | undefined, relation: string) => (
-  Array.from(new Set([...(relations || []), relation]))
+type SyncedRelationProfile = {
+  sourceProfileId: string;
+  handle: string;
+  displayName: string;
+  avatarUrl?: string | null;
+  bio?: string | null;
+  rawJson: string;
+  relations: string[];
+};
+
+const appendUniqueRelation = (relations: readonly string[] = [], relation: string) => (
+  Array.from(new Set([...relations, relation]))
 );
 
 const parseSourceAccountAuthData = (authData: string | null | undefined): SourceAccountAuthData | null => {
@@ -777,7 +787,7 @@ async function startServer() {
         follows = followsResponse.data.follows;
       }
       
-      const allProfilesMap = new Map();
+      const allProfilesMap = new Map<string, SyncedRelationProfile>();
 
       // Normalize
       const processProfile = (p: any, relation: string) => {
@@ -939,7 +949,7 @@ async function startServer() {
         following = followingRes.ok ? await followingRes.json() : [];
       }
       
-      const allProfilesMap = new Map();
+      const allProfilesMap = new Map<string, SyncedRelationProfile>();
 
       const processProfile = (p: any, relation: string) => {
         const existing = allProfilesMap.get(p.acct);
@@ -1257,7 +1267,7 @@ async function startServer() {
         }
       }
 
-      const allProfilesMap = new Map();
+      const allProfilesMap = new Map<string, SyncedRelationProfile>();
 
       const processProfile = (p: any, relation: string) => {
         const existing = allProfilesMap.get(p.id);
