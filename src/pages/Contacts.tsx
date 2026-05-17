@@ -9,6 +9,7 @@ import { Textarea } from '@/components/ui/textarea';
 import { Label } from '@/components/ui/label';
 import { Search, Github, Twitter, Linkedin, Link2, Hash, CheckSquare, Trash2, Download, StickyNote, Mail } from 'lucide-react';
 import { toast } from 'sonner';
+import { apiUrl } from '@/lib/api';
 
 const getSourceIcon = (sourceType: string) => {
   switch (sourceType?.toLowerCase()) {
@@ -55,7 +56,7 @@ export default function Contacts() {
 
   const fetchContacts = async () => {
     try {
-      const res = await fetch('/api/candidates');
+      const res = await fetch(apiUrl('/api/candidates'));
       const data = await res.json();
       setContacts(data.filter((c: any) => c.status === 'approved'));
     } catch (e) {
@@ -68,7 +69,7 @@ export default function Contacts() {
     if (!selectedContact) return;
     setIsSavingNotes(true);
     try {
-      const res = await fetch(`/api/candidates/${selectedContact.id}`, {
+      const res = await fetch(apiUrl(`/api/candidates/${selectedContact.id}`), {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ notes: notesDraft })
@@ -111,7 +112,7 @@ export default function Contacts() {
     if (selectedIds.size === 0) return;
     try {
       for (const id of Array.from(selectedIds)) {
-        await fetch(`/api/candidates/${id}`, {
+        await fetch(apiUrl(`/api/candidates/${id}`), {
           method: 'PATCH',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ status: 'ignored' })

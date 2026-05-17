@@ -1156,9 +1156,9 @@ async function startServer() {
 
         const socialProfileId = uuidv4();
         
-        const existingProfile = db.query.socialProfiles.findFirst({
-          where: eq(schema.socialProfiles.sourceProfileId, sourceProfileId)
-        });
+        const existingProfile = db.select().from(schema.socialProfiles)
+          .where(eq(schema.socialProfiles.sourceProfileId, sourceProfileId))
+          .get();
 
         let profileIdToUse = existingProfile?.id;
 

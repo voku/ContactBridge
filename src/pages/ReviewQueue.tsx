@@ -5,6 +5,7 @@ import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Check, X, GitMerge } from 'lucide-react';
 import { toast } from 'sonner';
+import { apiUrl } from '@/lib/api';
 
 export default function ReviewQueue() {
   const [candidates, setCandidates] = useState<any[]>([]);
@@ -17,7 +18,7 @@ export default function ReviewQueue() {
 
   const fetchCandidates = async () => {
     try {
-      const res = await fetch('/api/candidates');
+      const res = await fetch(apiUrl('/api/candidates'));
       const data = await res.json();
       setCandidates(data.filter((c: any) => c.status === 'pending'));
     } catch (e) {
@@ -27,7 +28,7 @@ export default function ReviewQueue() {
 
   const handleAction = async (id: string, action: 'approved' | 'ignored') => {
     try {
-      await fetch(`/api/candidates/${id}`, {
+      await fetch(apiUrl(`/api/candidates/${id}`), {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ status: action })
@@ -59,7 +60,7 @@ export default function ReviewQueue() {
     const ids = Array.from(selectedIds);
     const primaryCandidateId = ids[0];
     try {
-      const res = await fetch('/api/candidates/merge', {
+      const res = await fetch(apiUrl('/api/candidates/merge'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({

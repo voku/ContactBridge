@@ -1,20 +1,116 @@
-<div align="center">
-<img width="1200" height="475" alt="GHBanner" src="https://github.com/user-attachments/assets/0aa67016-6eaf-458a-adb2-6e31a0763ed6" />
-</div>
+# ContactBridge
 
-# Run and deploy your AI Studio app
+ContactBridge is a privacy-first social contact hub. It imports profiles from supported sources, groups them into reviewable candidates, and exports approved contacts as CSV, JSON, or vCard files.
 
-This contains everything you need to run your app locally.
+## Features
 
-View your app in AI Studio: https://ai.studio/apps/9f100f3e-0d04-49bb-818f-905af2033bc9
+- Import contacts from Bluesky, GitHub, Google Contacts, LinkedIn, Mastodon, and X
+- Review and merge candidate identities before approving them
+- Export approved contacts in CSV, JSON, and VCF formats
+- Optional browser extension for manual profile capture
+- Separate frontend and backend deployment support
 
-## Run Locally
+## Architecture
 
-**Prerequisites:**  Node.js
+- `src/`: React + Vite frontend
+- `server.ts`: Express API, OAuth callbacks, and SQLite-backed sync logic
+- `src/lib/db/schema.ts`: Drizzle schema for persisted data
+- `extension/`: Chrome extension for manual profile capture
 
+The local development server runs the Express backend and serves the Vite frontend from the same origin.
+
+## Requirements
+
+- Node.js 22+
+- npm
+
+## Local development
 
 1. Install dependencies:
-   `npm install`
-2. Set the `GEMINI_API_KEY` in [.env.local](.env.local) to your Gemini API key
-3. Run the app:
-   `npm run dev`
+
+   ```bash
+   npm install
+   ```
+
+2. Create a local environment file:
+
+   ```bash
+   cp /home/runner/work/ContactBridge/ContactBridge/.env.example /home/runner/work/ContactBridge/ContactBridge/.env.local
+   ```
+
+3. Set the values you need:
+
+   - `APP_URL`: public backend URL used for OAuth callbacks
+   - `VITE_API_BASE_URL`: optional frontend API origin when the UI is hosted separately
+
+4. Start the app:
+
+   ```bash
+   npm run dev
+   ```
+
+5. Open `http://localhost:3000`.
+
+## Scripts
+
+- `npm run dev`: start the local Express + Vite app
+- `npm run lint`: run TypeScript checks
+- `npm run build:client`: build the static frontend only
+- `npm run build`: build the frontend and bundle the Node server
+- `npm run start`: run the production server bundle
+
+## Production deployment
+
+### Full application deployment
+
+Use `npm run build` when you want the Express API and frontend deployed together on a Node-compatible host.
+
+Required environment variables:
+
+- `APP_URL`: absolute backend origin, for example `https://api.example.com`
+- `VITE_API_BASE_URL`: optional absolute API origin for separately hosted frontends
+
+### GitHub Pages frontend deployment
+
+This repository includes a GitHub Actions workflow that deploys the Vite frontend to GitHub Pages on pushes to `main`.
+
+Important:
+
+- GitHub Pages hosts the frontend only
+- The API, OAuth callbacks, and SQLite database still require a separate backend deployment
+- Set `VITE_API_BASE_URL` in your frontend environment if the backend lives on another origin
+
+The workflow uses:
+
+- `VITE_BASE_PATH=/ContactBridge/`
+- `VITE_SITE_URL=https://voku.github.io/ContactBridge/`
+
+If you fork this repository, update those values in `/home/runner/work/ContactBridge/ContactBridge/.github/workflows/deploy-pages.yml`.
+
+## Browser extension
+
+The Chrome extension lives in `/home/runner/work/ContactBridge/ContactBridge/extension`.
+
+To load it locally:
+
+1. Open `chrome://extensions`
+2. Enable **Developer mode**
+3. Choose **Load unpacked**
+4. Select `/home/runner/work/ContactBridge/ContactBridge/extension`
+
+## Key Files Detector helper prompt
+
+Use this prompt when you want an assistant to identify the most relevant files before making changes:
+
+```text
+You are reviewing the ContactBridge repository. Identify the key files for this task, grouped by frontend, backend, data model, deployment, and documentation. For each file, explain in one sentence why it matters and which change risks it affects.
+```
+
+## Verification
+
+Before opening a pull request, run:
+
+```bash
+npm run lint
+npm run build
+```
