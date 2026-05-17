@@ -208,7 +208,11 @@ export default function Sources() {
       const response = await fetch(apiUrl('/api/auth/x/url'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ clientId: xClientId, clientSecret: xClientSecret })
+        body: JSON.stringify({
+          clientId: xClientId,
+          clientSecret: xClientSecret,
+          popupOrigin: window.location.origin
+        })
       });
       if (!response.ok) {
         let msg = 'Failed to get auth URL';
@@ -460,7 +464,11 @@ export default function Sources() {
       const response = await fetch(apiUrl('/api/auth/google/url'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ clientId: googleClientId, clientSecret: googleClientSecret })
+        body: JSON.stringify({
+          clientId: googleClientId,
+          clientSecret: googleClientSecret,
+          popupOrigin: window.location.origin
+        })
       });
       if (!response.ok) {
         let msg = 'Failed to get auth URL';

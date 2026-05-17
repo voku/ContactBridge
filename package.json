@@ -1,8 +1,12 @@
 {
-  "name": "react-example",
+  "name": "contactbridge",
   "private": true,
-  "version": "0.0.0",
+  "version": "1.0.0",
+  "description": "Privacy-first social contact hub for reviewing, merging, and exporting connections from multiple sources.",
   "type": "module",
+  "engines": {
+    "node": ">=22"
+  },
   "scripts": {
     "dev": "tsx server.ts",
     "test:integration": "node --import tsx --test test/integration/*.test.ts",

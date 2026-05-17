@@ -1,6 +1,10 @@
 {
   "name": "ContactBridge",
-  "description": "Privacy-first social contact hub. Builds a clean address book from your social graph on Bluesky, Mastodon, X, and LinkedIn.",
+  "description": "Privacy-first social contact hub. Builds a clean, reviewable address book from Bluesky, Mastodon, X, LinkedIn, GitHub, and Google Contacts.",
   "requestFramePermissions": [],
-  "majorCapabilities": []
+  "majorCapabilities": [
+    "Import contacts from multiple providers",
+    "Review and merge candidates before approval",
+    "Export approved contacts as CSV, JSON, and vCard"
+  ]
 }

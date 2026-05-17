@@ -185,6 +185,17 @@ const deleteJson = async <T>(baseUrl: string, pathname: string): Promise<T> => {
   return response.json() as Promise<T>;
 };
 
+const patchJson = async <T>(baseUrl: string, pathname: string, body: Record<string, unknown>): Promise<T> => {
+  const response = await fetch(`${baseUrl}${pathname}`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body)
+  });
+
+  assert.equal(response.ok, true, `Expected ${pathname} to succeed`);
+  return response.json() as Promise<T>;
+};
+
 const postSync = async <T>(baseUrl: string, pathname: string, body: Record<string, unknown>): Promise<T> => {
   const response = await fetch(`${baseUrl}${pathname}`, {
     method: 'POST',
@@ -254,6 +265,142 @@ for (const syncCase of syncCases) {
     assert.equal(jobs[0]?.sourceType, syncCase.sourceType);
   });
 }
+
+test('manual captures stay reviewable until approved and preserve notes', async (t) => {
+  const server = await startServer();
+  t.after(() => stopServer(server));
+
+  const captureResult = await postJson<{ id: string; status: string }>(server.baseUrl, '/api/capture/manual', {
+    source: 'linkedin',
+    profileUrl: 'https://www.linkedin.com/in/jane-demo',
+    displayName: 'Jane Demo',
+    handle: 'jane-demo',
+    headline: 'Product designer'
+  });
+
+  assert.equal(captureResult.status, 'pending');
+
+  let candidates = await getJson<Array<{
+    id: string;
+    canonicalName: string;
+    status: string;
+    notes: string | null;
+    profiles: Array<{ profileUrl: string | null; sourceType: string; handle: string | null }>;
+  }>>(server.baseUrl, '/api/candidates');
+
+  assert.equal(candidates.length, 1);
+  assert.equal(candidates[0]?.status, 'pending');
+  assert.equal(candidates[0]?.profiles[0]?.profileUrl, 'https://www.linkedin.com/in/jane-demo');
+
+  await patchJson<{ success: boolean }>(server.baseUrl, `/api/candidates/${captureResult.id}`, {
+    status: 'approved',
+    notes: 'Met at FOSDEM'
+  });
+
+  candidates = await getJson<Array<{
+    id: string;
+    status: string;
+    notes: string | null;
+  }>>(server.baseUrl, '/api/candidates');
+
+  assert.deepEqual(candidates, [{
+    id: captureResult.id,
+    status: 'approved',
+    notes: 'Met at FOSDEM'
+  }]);
+
+  const dashboard = await getJson<{ totalCandidates: number; approvedContacts: number; changedProfiles: number; failedSyncJobs: number }>(
+    server.baseUrl,
+    '/api/dashboard'
+  );
+
+  assert.deepEqual(dashboard, {
+    totalCandidates: 0,
+    approvedContacts: 1,
+    changedProfiles: 1,
+    failedSyncJobs: 0
+  });
+});
+
+test('merging candidates preserves notes and combined profiles', async (t) => {
+  const server = await startServer();
+  t.after(() => stopServer(server));
+
+  const primaryCapture = await postJson<{ id: string }>(server.baseUrl, '/api/capture/manual', {
+    source: 'x',
+    profileUrl: 'https://x.com/alice-demo',
+    displayName: 'Alice Demo',
+    handle: 'alice-demo',
+    headline: 'Founder'
+  });
+  const secondaryCapture = await postJson<{ id: string }>(server.baseUrl, '/api/capture/manual', {
+    source: 'bluesky',
+    profileUrl: 'https://bsky.app/profile/alice-demo-bsky',
+    displayName: 'Alice D.',
+    handle: 'alice-demo-bsky',
+    headline: 'Builder'
+  });
+
+  await patchJson(server.baseUrl, `/api/candidates/${primaryCapture.id}`, { notes: 'Met in person' });
+  await patchJson(server.baseUrl, `/api/candidates/${secondaryCapture.id}`, { notes: 'Follow up next week' });
+
+  await postJson<{ success: boolean }>(server.baseUrl, '/api/candidates/merge', {
+    primaryCandidateId: primaryCapture.id,
+    secondaryCandidateIds: [secondaryCapture.id]
+  });
+
+  const candidates = await getJson<Array<{
+    id: string;
+    canonicalName: string;
+    notes: string | null;
+    profiles: Array<{ sourceType: string }>;
+  }>>(server.baseUrl, '/api/candidates');
+
+  assert.equal(candidates.length, 1);
+  assert.equal(candidates[0]?.id, primaryCapture.id);
+  assert.equal(candidates[0]?.canonicalName, 'Alice Demo');
+  assert.equal(candidates[0]?.notes, 'Met in person\n\nFollow up next week');
+  assert.deepEqual(candidates[0]?.profiles.map((profile) => profile.sourceType).sort(), ['bluesky', 'x']);
+});
+
+test('disconnecting a source account removes imported contacts and profiles', async (t) => {
+  const server = await startServer();
+  t.after(() => stopServer(server));
+
+  const sourceAccount = await postJson<{ id: string }>(server.baseUrl, '/api/source-accounts', {
+    sourceType: 'github',
+    accountIdentifier: 'github-demo-account',
+    displayName: 'github demo',
+    authStatus: 'pending'
+  });
+
+  await postSync<{ success: boolean }>(server.baseUrl, '/api/sync/github', {
+    sourceAccountId: sourceAccount.id,
+    token: 'demo-token'
+  });
+
+  await deleteJson<{ success: boolean }>(server.baseUrl, `/api/source-accounts/${sourceAccount.id}`);
+
+  const accounts = await getJson<Array<{ id: string }>>(server.baseUrl, '/api/source-accounts');
+  assert.equal(accounts.length, 0);
+
+  const candidates = await getJson<Array<{ id: string }>>(server.baseUrl, '/api/candidates');
+  assert.equal(candidates.length, 0);
+
+  const dashboard = await getJson<{ totalCandidates: number; approvedContacts: number; changedProfiles: number; failedSyncJobs: number }>(
+    server.baseUrl,
+    '/api/dashboard'
+  );
+  assert.deepEqual(dashboard, {
+    totalCandidates: 0,
+    approvedContacts: 0,
+    changedProfiles: 0,
+    failedSyncJobs: 0
+  });
+
+  const jobs = await getJson<Array<{ id: string }>>(server.baseUrl, '/api/dashboard/sync-jobs');
+  assert.equal(jobs.length, 0);
+});
 
 test('erases all stored demo data', async (t) => {
   const server = await startServer();

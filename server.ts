@@ -9,7 +9,7 @@ import Database from 'better-sqlite3';
 import { drizzle } from 'drizzle-orm/better-sqlite3';
 import { v4 as uuidv4 } from "uuid";
 import * as schema from "./src/lib/db/schema.js";
-import { eq, desc } from "drizzle-orm";
+import { and, eq, desc } from "drizzle-orm";
 import { TwitterApi } from "twitter-api-v2";
 
 dotenv.config({ path: '.env.local', override: true });
@@ -170,6 +170,63 @@ const normalizeMastodonInstanceUrl = (instance: string) => {
   instanceUrl.hash = '';
 
   return instanceUrl.toString().replace(/\/$/, '');
+};
+
+const MANUAL_CAPTURE_SOURCES = new Set(['bluesky', 'linkedin', 'x']);
+
+const trimMaybeString = (value: unknown) => typeof value === 'string' ? value.trim() : '';
+
+const normalizePopupOrigin = (value: unknown) => {
+  const origin = trimMaybeString(value);
+  if (!origin) {
+    return null;
+  }
+
+  try {
+    const popupUrl = new URL(origin);
+    if (popupUrl.protocol !== 'http:' && popupUrl.protocol !== 'https:') {
+      return null;
+    }
+
+    popupUrl.pathname = '';
+    popupUrl.search = '';
+    popupUrl.hash = '';
+    return popupUrl.toString().replace(/\/$/, '');
+  } catch {
+    return null;
+  }
+};
+
+const getAppOrigin = (req: express.Request) => {
+  const configuredUrl = trimMaybeString(process.env.APP_URL);
+  if (configuredUrl) {
+    return new URL(configuredUrl).origin;
+  }
+
+  return `${req.protocol}://${req.get('host')}`;
+};
+
+const getOauthRedirectUri = (req: express.Request, provider: 'google' | 'x') => {
+  return `${getAppOrigin(req)}/auth/${provider}/callback`;
+};
+
+const serializeForInlineScript = (value: unknown) => {
+  return JSON.stringify(value)
+    .replace(/</g, '\\u003c')
+    .replace(/>/g, '\\u003e')
+    .replace(/&/g, '\\u0026')
+    .replace(/\u2028/g, '\\u2028')
+    .replace(/\u2029/g, '\\u2029');
+};
+
+const mergeCandidateNotes = (notes: Array<string | null | undefined>) => {
+  const mergedNotes = Array.from(new Set(
+    notes
+      .map((note) => trimMaybeString(note))
+      .filter(Boolean)
+  ));
+
+  return mergedNotes.length > 0 ? mergedNotes.join('\n\n') : null;
 };
 
 const getLinkedInLocalizedText = (value: any) => {
@@ -336,9 +393,58 @@ async function startServer() {
   app.delete("/api/source-accounts/:id", (req, res) => {
     const { id } = req.params;
     try {
-      db.delete(schema.syncJobs).where(eq(schema.syncJobs.sourceAccountId, id)).run();
-      db.delete(schema.relationshipEdges).where(eq(schema.relationshipEdges.sourceAccountId, id)).run();
-      db.delete(schema.sourceAccounts).where(eq(schema.sourceAccounts.id, id)).run();
+      db.transaction(() => {
+        const relatedProfileIds = Array.from(new Set(
+          db.select({ socialProfileId: schema.relationshipEdges.socialProfileId })
+            .from(schema.relationshipEdges)
+            .where(eq(schema.relationshipEdges.sourceAccountId, id))
+            .all()
+            .map((edge) => edge.socialProfileId)
+            .filter((profileId): profileId is string => Boolean(profileId))
+        ));
+
+        db.delete(schema.syncJobs).where(eq(schema.syncJobs.sourceAccountId, id)).run();
+        db.delete(schema.relationshipEdges).where(eq(schema.relationshipEdges.sourceAccountId, id)).run();
+        db.delete(schema.sourceAccounts).where(eq(schema.sourceAccounts.id, id)).run();
+
+        for (const socialProfileId of relatedProfileIds) {
+          const remainingRelationship = db.select({ id: schema.relationshipEdges.id })
+            .from(schema.relationshipEdges)
+            .where(eq(schema.relationshipEdges.socialProfileId, socialProfileId))
+            .get();
+
+          if (remainingRelationship) {
+            continue;
+          }
+
+          const affectedCandidateIds = db.select({ contactCandidateId: schema.contactCandidateProfiles.contactCandidateId })
+            .from(schema.contactCandidateProfiles)
+            .where(eq(schema.contactCandidateProfiles.socialProfileId, socialProfileId))
+            .all()
+            .map((entry) => entry.contactCandidateId)
+            .filter((candidateId): candidateId is string => Boolean(candidateId));
+
+          db.delete(schema.contactCandidateProfiles)
+            .where(eq(schema.contactCandidateProfiles.socialProfileId, socialProfileId))
+            .run();
+          db.delete(schema.socialProfiles)
+            .where(eq(schema.socialProfiles.id, socialProfileId))
+            .run();
+
+          for (const candidateId of affectedCandidateIds) {
+            const remainingProfile = db.select({ socialProfileId: schema.contactCandidateProfiles.socialProfileId })
+              .from(schema.contactCandidateProfiles)
+              .where(eq(schema.contactCandidateProfiles.contactCandidateId, candidateId))
+              .get();
+
+            if (!remainingProfile) {
+              db.delete(schema.contactCandidates)
+                .where(eq(schema.contactCandidates.id, candidateId))
+                .run();
+            }
+          }
+        }
+      })();
       res.json({ success: true });
     } catch (e: any) {
       console.error("Failed to delete source account:", e);
@@ -379,6 +485,37 @@ async function startServer() {
       }
 
       db.transaction(() => {
+        const primaryCandidate = db.select().from(schema.contactCandidates)
+          .where(eq(schema.contactCandidates.id, primaryCandidateId))
+          .get();
+
+        if (!primaryCandidate) {
+          throw new Error('Primary candidate not found');
+        }
+
+        const secondaryCandidates = secondaryCandidateIds
+          .filter((id) => typeof id === 'string' && id !== primaryCandidateId)
+          .map((id) => db.select().from(schema.contactCandidates)
+            .where(eq(schema.contactCandidates.id, id))
+            .get())
+          .filter(Boolean);
+
+        db.update(schema.contactCandidates)
+          .set({
+            canonicalName: primaryCandidate.canonicalName || secondaryCandidates.find((candidate) => candidate?.canonicalName)?.canonicalName || 'Unknown',
+            confidenceScore: Math.max(
+              primaryCandidate.confidenceScore || 0,
+              ...secondaryCandidates.map((candidate) => candidate?.confidenceScore || 0)
+            ),
+            notes: mergeCandidateNotes([primaryCandidate.notes, ...secondaryCandidates.map((candidate) => candidate?.notes)]),
+            status: [primaryCandidate.status, ...secondaryCandidates.map((candidate) => candidate?.status)].includes('approved')
+              ? 'approved'
+              : primaryCandidate.status || 'pending',
+            updatedAt: new Date()
+          })
+          .where(eq(schema.contactCandidates.id, primaryCandidateId))
+          .run();
+
         for (const id of secondaryCandidateIds) {
           if (id === primaryCandidateId) continue;
           db.update(schema.contactCandidateProfiles)
@@ -399,7 +536,7 @@ async function startServer() {
   });
   
   app.get("/api/dashboard", (req, res) => {
-    const totalCandidates = db.select().from(schema.contactCandidates).all().length;
+    const totalCandidates = db.select().from(schema.contactCandidates).where(eq(schema.contactCandidates.status, 'pending')).all().length;
     const approvedContacts = db.select().from(schema.contactCandidates).where(eq(schema.contactCandidates.status, 'approved')).all().length;
     const totalProfiles = db.select().from(schema.socialProfiles).all().length;
     const failedSyncJobs = db.select().from(schema.syncJobs).where(eq(schema.syncJobs.status, 'failed')).all().length;
@@ -745,21 +882,21 @@ async function startServer() {
   });
 
 
-  const oauthStore = new Map<string, { codeVerifier: string, state: string, clientId: string, clientSecret: string }>();
+  const oauthStore = new Map<string, { codeVerifier: string, state: string, clientId: string, clientSecret: string, popupOrigin: string | null }>();
 
   app.post('/api/auth/x/url', syncRateLimiter, (req, res) => {
     try {
-      const { clientId, clientSecret } = req.body;
+      const { clientId, clientSecret, popupOrigin } = req.body;
       if (!clientId || !clientSecret) {
         throw new Error('Client ID or Client Secret is missing.');
       }
 
       const client = new TwitterApi({ clientId, clientSecret });
-      const redirectUri = `${process.env.APP_URL || 'http://localhost:3000'}/auth/x/callback`;
+      const redirectUri = getOauthRedirectUri(req, 'x');
       
       const { url, codeVerifier, state } = client.generateOAuth2AuthLink(redirectUri, { scope: ['tweet.read', 'users.read', 'follows.read', 'offline.access'] });
       
-      oauthStore.set(state, { codeVerifier, state, clientId, clientSecret });
+      oauthStore.set(state, { codeVerifier, state, clientId, clientSecret, popupOrigin: normalizePopupOrigin(popupOrigin) });
       res.json({ url });
     } catch (e: any) {
       res.status(500).json({ error: e.message });
@@ -776,7 +913,8 @@ async function startServer() {
 
     try {
       const client = new TwitterApi({ clientId: store.clientId, clientSecret: store.clientSecret });
-      const redirectUri = `${process.env.APP_URL || 'http://localhost:3000'}/auth/x/callback`;
+      const redirectUri = getOauthRedirectUri(req, 'x');
+      const postMessageOrigin = store.popupOrigin || getAppOrigin(req);
       
       const { client: loggedClient, accessToken, refreshToken } = await client.loginWithOAuth2({
         code: code as string,
@@ -791,10 +929,13 @@ async function startServer() {
           <body>
             <script>
               if (window.opener) {
-                window.opener.postMessage({ type: 'OAUTH_AUTH_SUCCESS_X', accessToken: "${accessToken}" }, '*');
+                window.opener.postMessage(
+                  ${serializeForInlineScript({ type: 'OAUTH_AUTH_SUCCESS_X', accessToken })},
+                  ${serializeForInlineScript(postMessageOrigin)}
+                );
                 window.close();
               } else {
-                window.location.href = '/';
+                window.location.href = ${serializeForInlineScript(postMessageOrigin)};
               }
             </script>
             <p>Authentication successful. This window should close automatically.</p>
@@ -806,16 +947,16 @@ async function startServer() {
     }
   });
 
-  const googleOauthStore = new Map<string, { clientId: string, clientSecret: string }>();
+  const googleOauthStore = new Map<string, { clientId: string, clientSecret: string, popupOrigin: string | null }>();
 
   app.post('/api/auth/google/url', syncRateLimiter, async (req, res) => {
     try {
-      const { clientId, clientSecret } = req.body;
+      const { clientId, clientSecret, popupOrigin } = req.body;
       if (!clientId || !clientSecret) {
         throw new Error('Client ID or Client Secret is missing.');
       }
       const { OAuth2Client } = await import('google-auth-library');
-      const redirectUri = `${process.env.APP_URL || 'http://localhost:3000'}/auth/google/callback`;
+      const redirectUri = getOauthRedirectUri(req, 'google');
       const client = new OAuth2Client(clientId, clientSecret, redirectUri);
       const state = uuidv4();
       
@@ -826,7 +967,7 @@ async function startServer() {
         state
       });
       
-      googleOauthStore.set(state, { clientId, clientSecret });
+      googleOauthStore.set(state, { clientId, clientSecret, popupOrigin: normalizePopupOrigin(popupOrigin) });
       res.json({ url });
     } catch (e: any) {
       res.status(500).json({ error: e.message });
@@ -843,9 +984,10 @@ async function startServer() {
 
     try {
       const { OAuth2Client } = await import('google-auth-library');
-      const redirectUri = `${process.env.APP_URL || 'http://localhost:3000'}/auth/google/callback`;
+      const redirectUri = getOauthRedirectUri(req, 'google');
       const client = new OAuth2Client(store.clientId, store.clientSecret, redirectUri);
       const { tokens } = await client.getToken(code as string);
+      const postMessageOrigin = store.popupOrigin || getAppOrigin(req);
       googleOauthStore.delete(state as string);
 
       res.send(`
@@ -853,10 +995,13 @@ async function startServer() {
           <body>
             <script>
               if (window.opener) {
-                window.opener.postMessage({ type: 'OAUTH_AUTH_SUCCESS_GOOGLE', tokens: ${JSON.stringify(tokens)} }, '*');
+                window.opener.postMessage(
+                  ${serializeForInlineScript({ type: 'OAUTH_AUTH_SUCCESS_GOOGLE', tokens })},
+                  ${serializeForInlineScript(postMessageOrigin)}
+                );
                 window.close();
               } else {
-                window.location.href = '/';
+                window.location.href = ${serializeForInlineScript(postMessageOrigin)};
               }
             </script>
             <p>Authentication successful. This window should close automatically.</p>
@@ -1456,41 +1601,107 @@ async function startServer() {
 
   // Add route for manual capture from extension
   app.post("/api/capture/manual", (req, res) => {
-    const { source, profileUrl, displayName, headline, handle, capturedAt } = req.body;
-    
-    // Save as social profile and create candidate
-    const id = uuidv4();
+    const source = trimMaybeString(req.body?.source).toLowerCase();
+    const displayName = trimMaybeString(req.body?.displayName);
+    const headline = trimMaybeString(req.body?.headline);
+    const handle = trimMaybeString(req.body?.handle).replace(/^@+/, '');
+    const profileUrl = trimMaybeString(req.body?.profileUrl);
+    const sourceProfileId = handle || profileUrl;
+
+    if (!MANUAL_CAPTURE_SOURCES.has(source)) {
+      return res.status(400).json({ error: 'Unsupported manual capture source.' });
+    }
+
+    if (!displayName && !handle) {
+      return res.status(400).json({ error: 'A display name or handle is required.' });
+    }
+
+    if (!sourceProfileId) {
+      return res.status(400).json({ error: 'A handle or profile URL is required.' });
+    }
+
+    let normalizedProfileUrl: string | null = null;
+    if (profileUrl) {
+      try {
+        const parsedProfileUrl = new URL(profileUrl);
+        if (parsedProfileUrl.protocol !== 'https:' && parsedProfileUrl.protocol !== 'http:') {
+          throw new Error('Unsupported protocol');
+        }
+        normalizedProfileUrl = parsedProfileUrl.toString();
+      } catch {
+        return res.status(400).json({ error: 'Profile URL must be a valid absolute URL.' });
+      }
+    }
+
     const now = new Date();
-    
-    db.insert(schema.socialProfiles).values({
-      id,
-      sourceType: source,
-      sourceProfileId: handle, 
-      handle,
-      displayName,
-      profileUrl,
-      bio: headline,
-      rawPublicPayloadJson: JSON.stringify(req.body),
-      firstSeenAt: now,
-      lastSeenAt: now,
-    }).run();
 
-    const candidateId = uuidv4();
-    db.insert(schema.contactCandidates).values({
-      id: candidateId,
-      canonicalName: displayName,
-      confidenceScore: 100, // manual capture is high confidence
-      status: 'approved', // maybe default to pending, but ok
-      createdAt: now,
-      updatedAt: now
-    }).run();
+    try {
+      const captureResult = db.transaction(() => {
+        const existingProfile = db.select().from(schema.socialProfiles)
+          .where(and(
+            eq(schema.socialProfiles.sourceType, source),
+            eq(schema.socialProfiles.sourceProfileId, sourceProfileId)
+          ))
+          .get();
 
-    db.insert(schema.contactCandidateProfiles).values({
-      contactCandidateId: candidateId,
-      socialProfileId: id
-    }).run();
+        const socialProfileId = existingProfile?.id || uuidv4();
 
-    res.json({ success: true, id: candidateId });
+        if (existingProfile) {
+          db.update(schema.socialProfiles)
+            .set({
+              handle: handle || existingProfile.handle,
+              displayName: displayName || existingProfile.displayName,
+              profileUrl: normalizedProfileUrl || existingProfile.profileUrl,
+              bio: headline || existingProfile.bio,
+              rawPublicPayloadJson: JSON.stringify(req.body),
+              lastSeenAt: now
+            })
+            .where(eq(schema.socialProfiles.id, socialProfileId))
+            .run();
+        } else {
+          db.insert(schema.socialProfiles).values({
+            id: socialProfileId,
+            sourceType: source,
+            sourceProfileId,
+            handle: handle || null,
+            displayName: displayName || handle || 'Unknown',
+            profileUrl: normalizedProfileUrl,
+            bio: headline || null,
+            rawPublicPayloadJson: JSON.stringify(req.body),
+            firstSeenAt: now,
+            lastSeenAt: now,
+          }).run();
+        }
+
+        assignProfileToCandidate(socialProfileId, displayName || handle, handle, now);
+
+        const candidateProfile = db.select().from(schema.contactCandidateProfiles)
+          .where(eq(schema.contactCandidateProfiles.socialProfileId, socialProfileId))
+          .get();
+
+        if (!candidateProfile?.contactCandidateId) {
+          throw new Error('Failed to assign captured profile to a candidate.');
+        }
+
+        const candidate = db.select().from(schema.contactCandidates)
+          .where(eq(schema.contactCandidates.id, candidateProfile.contactCandidateId))
+          .get();
+
+        if (!candidate) {
+          throw new Error('Failed to load the captured candidate.');
+        }
+
+        return {
+          id: candidate.id,
+          status: candidate.status || 'pending'
+        };
+      })();
+
+      res.json({ success: true, ...captureResult });
+    } catch (e: any) {
+      console.error("Failed to capture profile:", e);
+      res.status(500).json({ error: e.message || 'Failed to capture profile' });
+    }
   });
 
   // --- END API ROUTES ---
