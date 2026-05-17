@@ -498,8 +498,8 @@ export default function Sources() {
               {bskySyncStatus && <span className="text-sm text-blue-600 font-medium animate-pulse">{bskySyncStatus}</span>}
               {!bskySyncStatus && bskySyncOutcome && <span className="text-sm font-medium text-gray-700">{bskySyncOutcome}</span>}
               <Dialog open={isBskyDialogOpen} onOpenChange={setIsBskyDialogOpen}>
-                <DialogTrigger asChild>
-                  <Button variant="outline">Connect Bluesky</Button>
+                <DialogTrigger render={<Button variant="outline" />}>
+                  Connect Bluesky
                 </DialogTrigger>
               <DialogContent>
                 <DialogHeader>
@@ -542,8 +542,8 @@ export default function Sources() {
               {mastodonSyncStatus && <span className="text-sm text-blue-600 font-medium animate-pulse">{mastodonSyncStatus}</span>}
               {!mastodonSyncStatus && mastodonSyncOutcome && <span className="text-sm font-medium text-gray-700">{mastodonSyncOutcome}</span>}
               <Dialog open={isMastodonDialogOpen} onOpenChange={setIsMastodonDialogOpen}>
-                <DialogTrigger asChild>
-                  <Button variant="outline">Connect Mastodon</Button>
+                <DialogTrigger render={<Button variant="outline" />}>
+                  Connect Mastodon
                 </DialogTrigger>
                 <DialogContent>
                   <DialogHeader>
@@ -586,8 +586,8 @@ export default function Sources() {
               {xSyncStatus && <span className="text-sm text-blue-600 font-medium animate-pulse">{xSyncStatus}</span>}
               {!xSyncStatus && xSyncOutcome && <span className="text-sm font-medium text-gray-700">{xSyncOutcome}</span>}
               <Dialog open={isXDialogOpen} onOpenChange={setIsXDialogOpen}>
-                <DialogTrigger asChild>
-                  <Button variant="outline">Connect X (Twitter)</Button>
+                <DialogTrigger render={<Button variant="outline" />}>
+                  Connect X (Twitter)
                 </DialogTrigger>
                 <DialogContent>
                   <DialogHeader>
@@ -631,8 +631,8 @@ export default function Sources() {
               {linkedinSyncStatus && <span className="text-sm text-blue-600 font-medium animate-pulse">{linkedinSyncStatus}</span>}
               {!linkedinSyncStatus && linkedinSyncOutcome && <span className="text-sm font-medium text-gray-700">{linkedinSyncOutcome}</span>}
               <Dialog open={isLinkedinDialogOpen} onOpenChange={setIsLinkedinDialogOpen}>
-                <DialogTrigger asChild>
-                  <Button variant="outline">Connect LinkedIn</Button>
+                <DialogTrigger render={<Button variant="outline" />}>
+                  Connect LinkedIn
                 </DialogTrigger>
                 <DialogContent>
                   <DialogHeader>
@@ -713,8 +713,8 @@ export default function Sources() {
               {githubSyncStatus && <span className="text-sm text-blue-600 font-medium animate-pulse">{githubSyncStatus}</span>}
               {!githubSyncStatus && githubSyncOutcome && <span className="text-sm font-medium text-gray-700">{githubSyncOutcome}</span>}
               <Dialog open={isGithubDialogOpen} onOpenChange={setIsGithubDialogOpen}>
-                <DialogTrigger asChild>
-                  <Button variant="outline">Connect GitHub</Button>
+                <DialogTrigger render={<Button variant="outline" />}>
+                  Connect GitHub
                 </DialogTrigger>
                 <DialogContent>
                   <DialogHeader>
@@ -753,8 +753,8 @@ export default function Sources() {
               {googleSyncStatus && <span className="text-sm text-blue-600 font-medium animate-pulse">{googleSyncStatus}</span>}
               {!googleSyncStatus && googleSyncOutcome && <span className="text-sm font-medium text-gray-700">{googleSyncOutcome}</span>}
               <Dialog open={isGoogleDialogOpen} onOpenChange={setIsGoogleDialogOpen}>
-                <DialogTrigger asChild>
-                  <Button variant="outline">Connect Google</Button>
+                <DialogTrigger render={<Button variant="outline" />}>
+                  Connect Google
                 </DialogTrigger>
                 <DialogContent>
                   <DialogHeader>
