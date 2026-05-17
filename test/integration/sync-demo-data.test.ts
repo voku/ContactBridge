@@ -138,7 +138,7 @@ const startServer = async (): Promise<ServerHandle> => {
     await waitForHealth(baseUrl);
   } catch (error) {
     serverProcess.kill('SIGTERM');
-    throw new Error(`${(error as Error).message}\n${stderr}`.trim());
+    throw new Error([(error as Error).message, stderr].filter(Boolean).join('\n'));
   }
 
   return { baseUrl, process: serverProcess, tempDir };

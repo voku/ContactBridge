@@ -145,7 +145,7 @@ const normalizeMastodonInstanceUrl = (instance: string) => {
   }
 
   if (net.isIP(hostname)) {
-    // fc00::/7 unique local IPv6 range, matched here by explicitly checking both fc* and fd* prefixes.
+    // Unique local IPv6 addresses use the fc00::/8 and fd00::/8 prefixes that together form the fc00::/7 range.
     const isUniqueLocalIpv6 = /^(fc|fd)[0-9a-f]{2}:/i.test(hostname);
     // fe80::/10 link-local IPv6 address range.
     const isLinkLocalIpv6 = /^fe[89ab][0-9a-f]:/i.test(hostname);
@@ -459,13 +459,13 @@ async function startServer() {
         followersResponse?: { followers?: any[] },
         followsResponse?: { follows?: any[] }
       }>('bluesky');
-      let followersResponse;
-      let followsResponse;
+      let followers: any[] = [];
+      let follows: any[] = [];
 
       if (demoData) {
         stream.progress('Loading demo data...');
-        followersResponse = { data: demoData.followersResponse || { followers: [] } };
-        followsResponse = { data: demoData.followsResponse || { follows: [] } };
+        followers = demoData.followersResponse?.followers || [];
+        follows = demoData.followsResponse?.follows || [];
       } else {
         stream.progress('Connecting to API...');
         const { BskyAgent } = await import('@atproto/api');
@@ -473,10 +473,12 @@ async function startServer() {
         await agent.login({ identifier, password });
 
         stream.progress('Fetching followers...');
-        followersResponse = await agent.getFollowers({ actor: agent.session!.did });
+        const followersResponse = await agent.getFollowers({ actor: agent.session!.did });
         
         stream.progress('Fetching follows...');
-        followsResponse = await agent.getFollows({ actor: agent.session!.did });
+        const followsResponse = await agent.getFollows({ actor: agent.session!.did });
+        followers = followersResponse.data.followers;
+        follows = followsResponse.data.follows;
       }
       
       const allProfilesMap = new Map();
@@ -495,8 +497,8 @@ async function startServer() {
       };
 
       stream.progress('Processing profiles...');
-      followersResponse.data.followers.forEach(p => processProfile(p, 'followed_by'));
-      followsResponse.data.follows.forEach(p => processProfile(p, 'follows'));
+      followers.forEach(p => processProfile(p, 'followed_by'));
+      follows.forEach(p => processProfile(p, 'follows'));
       // Note: for ones that are mutually following, 'follows' might overwrite 'followed_by', which is fine for MVP
 
       let insertedCount = 0;
