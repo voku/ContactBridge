@@ -256,9 +256,9 @@ for (const syncCase of syncCases) {
       candidates.every((candidate) => candidate.profiles.length === 1 && candidate.profiles[0]?.sourceType === syncCase.sourceType)
     );
 
-    const dashboard = await getJson<{ totalCandidates: number; changedProfiles: number; failedSyncJobs: number }>(server.baseUrl, '/api/dashboard');
+    const dashboard = await getJson<{ totalCandidates: number; indexedProfiles: number; failedSyncJobs: number }>(server.baseUrl, '/api/dashboard');
     assert.equal(dashboard.totalCandidates, syncCase.expectedNames.length);
-    assert.equal(dashboard.changedProfiles, syncCase.expectedNames.length);
+    assert.equal(dashboard.indexedProfiles, syncCase.expectedNames.length);
     assert.equal(dashboard.failedSyncJobs, 0);
 
     const jobs = await getJson<Array<{ status: string; sourceType: string }>>(server.baseUrl, '/api/dashboard/sync-jobs');
@@ -362,7 +362,7 @@ test('manual captures stay reviewable until approved and preserve notes', async 
   assert.equal(updatedCandidates[0]?.status, 'approved');
   assert.equal(updatedCandidates[0]?.notes, 'Met at FOSDEM');
 
-  const dashboard = await getJson<{ totalCandidates: number; approvedContacts: number; changedProfiles: number; failedSyncJobs: number }>(
+  const dashboard = await getJson<{ totalCandidates: number; approvedContacts: number; indexedProfiles: number; failedSyncJobs: number }>(
     server.baseUrl,
     '/api/dashboard'
   );
@@ -370,7 +370,7 @@ test('manual captures stay reviewable until approved and preserve notes', async 
   assert.deepEqual(dashboard, {
     totalCandidates: 0,
     approvedContacts: 1,
-    changedProfiles: 1,
+    indexedProfiles: 1,
     failedSyncJobs: 0
   });
 });
@@ -504,14 +504,14 @@ test('re-syncing a source removes stale relationships and orphaned contacts', as
   const candidates = await getJson<Array<{ canonicalName: string }>>(server.baseUrl, '/api/candidates');
   assert.deepEqual(candidates.map((candidate) => candidate.canonicalName), ['ivan-demo']);
 
-  const dashboard = await getJson<{ totalCandidates: number; approvedContacts: number; changedProfiles: number; failedSyncJobs: number }>(
+  const dashboard = await getJson<{ totalCandidates: number; approvedContacts: number; indexedProfiles: number; failedSyncJobs: number }>(
     server.baseUrl,
     '/api/dashboard'
   );
   assert.deepEqual(dashboard, {
     totalCandidates: 1,
     approvedContacts: 0,
-    changedProfiles: 1,
+    indexedProfiles: 1,
     failedSyncJobs: 0
   });
 });
@@ -540,14 +540,14 @@ test('disconnecting a source account removes imported contacts and profiles', as
   const candidates = await getJson<Array<{ id: string }>>(server.baseUrl, '/api/candidates');
   assert.equal(candidates.length, 0);
 
-  const dashboard = await getJson<{ totalCandidates: number; approvedContacts: number; changedProfiles: number; failedSyncJobs: number }>(
+  const dashboard = await getJson<{ totalCandidates: number; approvedContacts: number; indexedProfiles: number; failedSyncJobs: number }>(
     server.baseUrl,
     '/api/dashboard'
   );
   assert.deepEqual(dashboard, {
     totalCandidates: 0,
     approvedContacts: 0,
-    changedProfiles: 0,
+    indexedProfiles: 0,
     failedSyncJobs: 0
   });
 
@@ -644,14 +644,14 @@ test('erases all stored demo data', async (t) => {
   const candidates = await getJson<Array<{ id: string }>>(server.baseUrl, '/api/candidates');
   assert.equal(candidates.length, 0);
 
-  const dashboard = await getJson<{ totalCandidates: number; approvedContacts: number; changedProfiles: number; failedSyncJobs: number }>(
+  const dashboard = await getJson<{ totalCandidates: number; approvedContacts: number; indexedProfiles: number; failedSyncJobs: number }>(
     server.baseUrl,
     '/api/dashboard'
   );
   assert.deepEqual(dashboard, {
     totalCandidates: 0,
     approvedContacts: 0,
-    changedProfiles: 0,
+    indexedProfiles: 0,
     failedSyncJobs: 0
   });
 
