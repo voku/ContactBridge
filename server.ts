@@ -291,6 +291,25 @@ async function startServer() {
     res.json({ status: "ok" });
   });
 
+  app.delete("/api/database", (req, res) => {
+    try {
+      sqlite.transaction(() => {
+        db.delete(schema.contactCandidateProfiles).run();
+        db.delete(schema.relationshipEdges).run();
+        db.delete(schema.syncJobs).run();
+        db.delete(schema.contactCandidates).run();
+        db.delete(schema.socialProfiles).run();
+        db.delete(schema.sourceAccounts).run();
+      })();
+
+      res.json({ success: true });
+    } catch (e: unknown) {
+      const errorMessage = e instanceof Error ? e.message : "Failed to erase database";
+      console.error("Failed to erase database:", e);
+      res.status(500).json({ error: errorMessage });
+    }
+  });
+
   // Source Accounts
   app.get("/api/source-accounts", (req, res) => {
     const accounts = db.select().from(schema.sourceAccounts).all();
