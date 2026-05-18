@@ -1227,6 +1227,76 @@ test('manual capture supports xing profile URLs', async (t) => {
   assert.equal(candidates[0]?.profiles[0]?.bio, 'Design lead');
 });
 
+test('manual batch capture imports visible LinkedIn overview profiles and dedupes duplicates', async (t) => {
+  const server = await startServer();
+  t.after(() => stopServer(server));
+
+  const batchResult = await postJson<{
+    candidateCount: number;
+    errorCount: number;
+    pendingCount: number;
+    success: boolean;
+    successCount: number;
+  }>(server.baseUrl, '/api/capture/manual/batch', {
+    profiles: [
+      {
+        source: 'linkedin',
+        profileUrl: 'https://www.linkedin.com/in/jane-demo/',
+        displayName: 'Jane Demo',
+        handle: 'jane-demo',
+        headline: 'Product designer'
+      },
+      {
+        source: 'linkedin',
+        profileUrl: 'https://www.linkedin.com/in/john-example/',
+        displayName: 'John Example',
+        handle: 'john-example',
+        headline: 'Founder'
+      },
+      {
+        source: 'linkedin',
+        profileUrl: 'https://www.linkedin.com/in/jane-demo/?trk=feed',
+        displayName: 'Jane D.',
+        handle: 'jane-demo',
+        headline: 'Design lead'
+      }
+    ]
+  });
+
+  assert.equal(batchResult.success, true);
+  assert.equal(batchResult.successCount, 2);
+  assert.equal(batchResult.pendingCount, 2);
+  assert.equal(batchResult.errorCount, 0);
+  assert.equal(batchResult.candidateCount, 2);
+
+  const candidates = await getJson<Array<{
+    canonicalName: string;
+    profiles: Array<{ bio: string | null; handle: string | null; sourceType: string }>;
+    status: string;
+  }>>(server.baseUrl, '/api/candidates');
+
+  assert.equal(candidates.length, 2);
+  assert.deepEqual(
+    candidates.map((candidate) => candidate.canonicalName).sort(),
+    ['Jane Demo', 'John Example']
+  );
+  assert.deepEqual(
+    candidates.map((candidate) => candidate.status),
+    ['pending', 'pending']
+  );
+  assert.deepEqual(
+    candidates.flatMap((candidate) => candidate.profiles.map((profile) => ({
+      bio: profile.bio,
+      handle: profile.handle,
+      sourceType: profile.sourceType
+    }))).sort((a, b) => String(a.handle).localeCompare(String(b.handle))),
+    [
+      { bio: 'Product designer', handle: 'jane-demo', sourceType: 'linkedin' },
+      { bio: 'Founder', handle: 'john-example', sourceType: 'linkedin' }
+    ]
+  );
+});
+
 test('merging candidates preserves notes and combined profiles', async (t) => {
   const server = await startServer();
   t.after(() => stopServer(server));

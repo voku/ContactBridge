@@ -858,6 +858,138 @@ const normalizeManualCaptureSourceProfileId = (source: string, handle: string, p
   return profileUrl.toLowerCase();
 };
 
+type NormalizedManualCapturePayload = {
+  displayName: string,
+  headline: string,
+  handle: string,
+  normalizedProfileUrl: string | null,
+  rawPayload: any,
+  source: string,
+  sourceProfileId: string
+};
+
+const normalizeManualCapturePayload = (payload: any): NormalizedManualCapturePayload => {
+  const source = trimMaybeString(payload?.source).toLowerCase();
+  const displayName = trimMaybeString(payload?.displayName);
+  const headline = trimMaybeString(payload?.headline);
+  const handle = normalizeProfileHandle(payload?.handle);
+  const profileUrl = trimMaybeString(payload?.profileUrl);
+
+  if (!MANUAL_CAPTURE_SOURCES.has(source)) {
+    throw new Error('Unsupported manual capture source.');
+  }
+
+  if (!displayName && !handle) {
+    throw new Error('A display name or handle is required.');
+  }
+
+  let normalizedProfileUrl: string | null = null;
+  if (profileUrl) {
+    try {
+      const parsedProfileUrl = new URL(profileUrl);
+      if (parsedProfileUrl.protocol !== 'https:' && parsedProfileUrl.protocol !== 'http:') {
+        throw new Error('Unsupported protocol');
+      }
+
+      const profileHostname = parsedProfileUrl.hostname.toLowerCase();
+      const sourceHostIsValid = (source === 'linkedin' && /(^|\.)linkedin\.com$/.test(profileHostname))
+        || (source === 'x' && (/(^|\.)x\.com$/.test(profileHostname) || /(^|\.)twitter\.com$/.test(profileHostname)))
+        || (source === 'xing' && /(^|\.)xing\.com$/.test(profileHostname))
+        || (source === 'bluesky' && profileHostname === 'bsky.app');
+      if (!sourceHostIsValid) {
+        throw new Error('Profile URL host does not match the selected source.');
+      }
+
+      normalizedProfileUrl = parsedProfileUrl.toString();
+    } catch (error) {
+      if (error instanceof Error && error.message === 'Profile URL host does not match the selected source.') {
+        throw error;
+      }
+      throw new Error('Profile URL must be a valid absolute URL.');
+    }
+  }
+
+  const sourceProfileId = normalizeManualCaptureSourceProfileId(source, handle, normalizedProfileUrl);
+  if (!sourceProfileId) {
+    throw new Error('A handle or profile URL is required.');
+  }
+
+  return {
+    displayName,
+    headline,
+    handle,
+    normalizedProfileUrl,
+    rawPayload: payload,
+    source,
+    sourceProfileId
+  };
+};
+
+const saveManualCapture = (payload: NormalizedManualCapturePayload) => {
+  const now = new Date();
+
+  return db.transaction(() => {
+    const existingProfile = db.select().from(schema.socialProfiles)
+      .where(and(
+        eq(schema.socialProfiles.sourceType, payload.source),
+        eq(schema.socialProfiles.sourceProfileId, payload.sourceProfileId)
+      ))
+      .get();
+
+    const socialProfileId = existingProfile?.id || uuidv4();
+
+    if (existingProfile) {
+      db.update(schema.socialProfiles)
+        .set({
+          handle: payload.handle || existingProfile.handle,
+          displayName: payload.displayName || existingProfile.displayName,
+          profileUrl: payload.normalizedProfileUrl || existingProfile.profileUrl,
+          bio: payload.headline || existingProfile.bio,
+          rawPublicPayloadJson: JSON.stringify(payload.rawPayload),
+          lastSeenAt: now
+        })
+        .where(eq(schema.socialProfiles.id, socialProfileId))
+        .run();
+    } else {
+      db.insert(schema.socialProfiles).values({
+        id: socialProfileId,
+        sourceType: payload.source,
+        sourceProfileId: payload.sourceProfileId,
+        handle: payload.handle || null,
+        displayName: payload.displayName || payload.handle,
+        profileUrl: payload.normalizedProfileUrl,
+        bio: payload.headline || null,
+        rawPublicPayloadJson: JSON.stringify(payload.rawPayload),
+        firstSeenAt: now,
+        lastSeenAt: now,
+      }).run();
+    }
+
+    assignProfileToCandidate(socialProfileId, payload.displayName || payload.handle, payload.handle, now);
+
+    const candidateProfile = db.select().from(schema.contactCandidateProfiles)
+      .where(eq(schema.contactCandidateProfiles.socialProfileId, socialProfileId))
+      .get();
+
+    if (!candidateProfile?.contactCandidateId) {
+      throw new Error('Failed to assign captured profile to a candidate.');
+    }
+
+    const candidate = db.select().from(schema.contactCandidates)
+      .where(eq(schema.contactCandidates.id, candidateProfile.contactCandidateId))
+      .get();
+
+    if (!candidate) {
+      throw new Error('Failed to load the captured candidate.');
+    }
+
+    return {
+      id: candidate.id,
+      status: candidate.status || 'pending'
+    };
+  });
+};
+
 const cleanupOrphanedProfiles = (socialProfileIds: Iterable<string>) => {
   for (const socialProfileId of new Set(Array.from(socialProfileIds).filter(Boolean))) {
     const remainingRelationship = db.select({ id: schema.relationshipEdges.id })
@@ -2670,117 +2802,81 @@ async function startServer() {
 
   // Add route for manual capture from extension
   app.post("/api/capture/manual", (req, res) => {
-    const source = trimMaybeString(req.body?.source).toLowerCase();
-    const displayName = trimMaybeString(req.body?.displayName);
-    const headline = trimMaybeString(req.body?.headline);
-    const handle = normalizeProfileHandle(req.body?.handle);
-    const profileUrl = trimMaybeString(req.body?.profileUrl);
-
-    if (!MANUAL_CAPTURE_SOURCES.has(source)) {
-      return res.status(400).json({ error: 'Unsupported manual capture source.' });
+    let payload: NormalizedManualCapturePayload;
+    try {
+      payload = normalizeManualCapturePayload(req.body);
+    } catch (e: any) {
+      return res.status(400).json({ error: e.message || 'Invalid capture payload.' });
     }
-
-    if (!displayName && !handle) {
-      return res.status(400).json({ error: 'A display name or handle is required.' });
-    }
-
-    let normalizedProfileUrl: string | null = null;
-    if (profileUrl) {
-      try {
-        const parsedProfileUrl = new URL(profileUrl);
-        if (parsedProfileUrl.protocol !== 'https:' && parsedProfileUrl.protocol !== 'http:') {
-          throw new Error('Unsupported protocol');
-        }
-
-        const profileHostname = parsedProfileUrl.hostname.toLowerCase();
-        const sourceHostIsValid = (source === 'linkedin' && /(^|\.)linkedin\.com$/.test(profileHostname))
-          || (source === 'x' && (/(^|\.)x\.com$/.test(profileHostname) || /(^|\.)twitter\.com$/.test(profileHostname)))
-          || (source === 'xing' && /(^|\.)xing\.com$/.test(profileHostname))
-          || (source === 'bluesky' && profileHostname === 'bsky.app');
-        if (!sourceHostIsValid) {
-          return res.status(400).json({ error: 'Profile URL host does not match the selected source.' });
-        }
-
-        normalizedProfileUrl = parsedProfileUrl.toString();
-      } catch {
-        return res.status(400).json({ error: 'Profile URL must be a valid absolute URL.' });
-      }
-    }
-
-    const sourceProfileId = normalizeManualCaptureSourceProfileId(source, handle, normalizedProfileUrl);
-    if (!sourceProfileId) {
-      return res.status(400).json({ error: 'A handle or profile URL is required.' });
-    }
-
-    const now = new Date();
 
     try {
-      const captureResult = db.transaction(() => {
-        const existingProfile = db.select().from(schema.socialProfiles)
-          .where(and(
-            eq(schema.socialProfiles.sourceType, source),
-            eq(schema.socialProfiles.sourceProfileId, sourceProfileId)
-          ))
-          .get();
-
-        const socialProfileId = existingProfile?.id || uuidv4();
-
-        if (existingProfile) {
-          db.update(schema.socialProfiles)
-            .set({
-              handle: handle || existingProfile.handle,
-              displayName: displayName || existingProfile.displayName,
-              profileUrl: normalizedProfileUrl || existingProfile.profileUrl,
-              bio: headline || existingProfile.bio,
-              rawPublicPayloadJson: JSON.stringify(req.body),
-              lastSeenAt: now
-            })
-            .where(eq(schema.socialProfiles.id, socialProfileId))
-            .run();
-        } else {
-          db.insert(schema.socialProfiles).values({
-            id: socialProfileId,
-            sourceType: source,
-            sourceProfileId,
-            handle: handle || null,
-            displayName: displayName || handle,
-            profileUrl: normalizedProfileUrl,
-            bio: headline || null,
-            rawPublicPayloadJson: JSON.stringify(req.body),
-            firstSeenAt: now,
-            lastSeenAt: now,
-          }).run();
-        }
-
-        assignProfileToCandidate(socialProfileId, displayName || handle, handle, now);
-
-        const candidateProfile = db.select().from(schema.contactCandidateProfiles)
-          .where(eq(schema.contactCandidateProfiles.socialProfileId, socialProfileId))
-          .get();
-
-        if (!candidateProfile?.contactCandidateId) {
-          throw new Error('Failed to assign captured profile to a candidate.');
-        }
-
-        const candidate = db.select().from(schema.contactCandidates)
-          .where(eq(schema.contactCandidates.id, candidateProfile.contactCandidateId))
-          .get();
-
-        if (!candidate) {
-          throw new Error('Failed to load the captured candidate.');
-        }
-
-        return {
-          id: candidate.id,
-          status: candidate.status || 'pending'
-        };
-      });
-
+      const captureResult = saveManualCapture(payload);
       res.json({ success: true, ...captureResult });
     } catch (e: any) {
       console.error("Failed to capture profile:", e);
       res.status(500).json({ error: e.message || 'Failed to capture profile' });
     }
+  });
+
+  app.post("/api/capture/manual/batch", (req, res) => {
+    const profiles = Array.isArray(req.body?.profiles) ? req.body.profiles : null;
+    if (!profiles?.length) {
+      return res.status(400).json({ error: 'At least one profile is required for batch capture.' });
+    }
+
+    if (profiles.length > 100) {
+      return res.status(400).json({ error: 'Batch capture is limited to 100 profiles at a time.' });
+    }
+
+    const errors: Array<{ error: string; index: number }> = [];
+    const seenProfiles = new Set<string>();
+    const capturedCandidateIds = new Set<string>();
+    let pendingCount = 0;
+    let successCount = 0;
+
+    profiles.forEach((profile, index) => {
+      let payload: NormalizedManualCapturePayload;
+      try {
+        payload = normalizeManualCapturePayload(profile);
+      } catch (e: any) {
+        errors.push({ error: e.message || 'Invalid capture payload.', index });
+        return;
+      }
+
+      const dedupeKey = `${payload.source}:${payload.sourceProfileId}`;
+      if (seenProfiles.has(dedupeKey)) {
+        return;
+      }
+      seenProfiles.add(dedupeKey);
+
+      try {
+        const captureResult = saveManualCapture(payload);
+        successCount += 1;
+        capturedCandidateIds.add(captureResult.id);
+        if (captureResult.status === 'pending') {
+          pendingCount += 1;
+        }
+      } catch (e: any) {
+        console.error("Failed to capture profile in batch:", e);
+        errors.push({ error: e.message || 'Failed to capture profile.', index });
+      }
+    });
+
+    if (!successCount) {
+      return res.status(400).json({
+        error: 'No valid profiles were captured from this page.',
+        errors
+      });
+    }
+
+    res.json({
+      success: true,
+      candidateCount: capturedCandidateIds.size,
+      errorCount: errors.length,
+      errors,
+      pendingCount,
+      successCount
+    });
   });
 
   // --- END API ROUTES ---

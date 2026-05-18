@@ -20,7 +20,7 @@ ContactBridge helps a single operator collect social/contact data from supported
 ## What it does today
 
 - Imports contacts from Bluesky, GitHub, Google Contacts, Mastodon, and X
-- Supports manual public-profile capture from LinkedIn, X, Bluesky, and XING with the browser extension
+- Supports manual public-profile capture from LinkedIn, X, Bluesky, and XING with the browser extension, plus visible LinkedIn overview-page import
 - Keeps imported identities in a review queue until you approve them
 - Exports approved contacts as CSV, JSON, or VCF
 - Supports local backup, restore, and full local reset in `APP_MODE=local` or `APP_MODE=test`
@@ -137,7 +137,7 @@ local-first, privacy-conscious, contact review, manual capture, export workflow,
 
 ## Browser extension
 
-The Chrome extension lives in `extension/` and supports manual capture from LinkedIn, X, Bluesky, and XING.
+The Chrome extension lives in `extension/` and supports manual capture from LinkedIn, X, Bluesky, and XING, plus visible LinkedIn overview-page import.
 
 - Load it unpacked for local beta use
 - The side panel validates `${hub}/api/extension/health` before saving a hub URL

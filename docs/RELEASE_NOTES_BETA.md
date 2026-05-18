@@ -11,7 +11,7 @@ ContactBridge is now available as a **local-first beta**. This release is intend
 - Local-first single-operator runtime with fail-closed `APP_MODE` handling
 - Source imports for Bluesky, GitHub, Google Contacts, Mastodon, and X
 - Restricted LinkedIn positioning: optional API sync only where approved partner access exists, plus manual extension capture
-- Manual profile capture for LinkedIn, X, Bluesky, and XING via the optional extension
+- Manual profile capture for LinkedIn, X, Bluesky, and XING via the optional extension, plus visible LinkedIn overview-page import
 - Candidate review, approval, ignore, and merge flows before export
 - Backend-generated CSV, JSON, and VCF exports
 - Local backup, restore, and reset flows in local/test mode
@@ -50,6 +50,7 @@ ContactBridge is now available as a **local-first beta**. This release is intend
 ContactBridge supports:
 
 - manual LinkedIn profile capture with the extension
+- explicit import of the visible profiles on supported LinkedIn overview pages
 - limited LinkedIn API sync only where approved partner access already exists
 
 ContactBridge does **not** support background scraping, broad crawling, or hidden collection of LinkedIn data.

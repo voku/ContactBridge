@@ -13,7 +13,15 @@ const extensionApi = (globalThis as typeof globalThis & {
       profileUrl: string;
       source: string;
     };
+    extractProfilesFromDocument: (doc: any, url: string) => Array<{
+      displayName: string;
+      handle: string;
+      headline: string;
+      profileUrl: string;
+      source: string;
+    }>;
     getProfileContext: (url: string) => {
+      captureMode?: string;
       handle: string;
       hostname: string;
       isSupported: boolean;
@@ -49,8 +57,33 @@ const createDocument = (selectors: Record<string, string>, title = '') => ({
   title
 });
 
+const createOverviewDocument = (anchors: Array<{
+  href: string;
+  innerText: string;
+  cardText: string;
+}>) => ({
+  querySelectorAll(selector: string) {
+    if (selector !== 'a[href*="/in/"]') {
+      return [];
+    }
+
+    return anchors.map((anchor) => ({
+      getAttribute(name: string) {
+        return name === 'href' ? anchor.href : null;
+      },
+      href: anchor.href,
+      innerText: anchor.innerText,
+      textContent: anchor.innerText,
+      closest() {
+        return { innerText: anchor.cardText };
+      }
+    }));
+  }
+});
+
 test('getProfileContext only treats real profile URLs as capturable', () => {
   assert.equal(extensionApi.getProfileContext('https://www.linkedin.com/in/jane-demo').source, 'linkedin');
+  assert.equal(extensionApi.getProfileContext('https://www.linkedin.com/feed/followers/').captureMode, 'overview');
   assert.equal(extensionApi.getProfileContext('https://x.com/jane_demo').source, 'x');
   assert.equal(extensionApi.getProfileContext('https://twitter.com/jane_demo').source, 'x');
   assert.equal(extensionApi.getProfileContext('https://x.com/home').isSupported, false);
@@ -99,6 +132,43 @@ test('extractProfileFromDocument reuses shared selectors for supported networks'
     profileUrl: 'https://www.xing.com/profile/Jane_Example',
     source: 'xing'
   });
+});
+
+test('extractProfilesFromDocument collects visible LinkedIn overview profiles once per handle', () => {
+  const profiles = extensionApi.extractProfilesFromDocument(createOverviewDocument([
+    {
+      cardText: 'Jane Demo\nProduct designer\nFollow',
+      href: '/in/jane-demo/',
+      innerText: 'Jane Demo'
+    },
+    {
+      cardText: 'John Example\nFounder\nMessage',
+      href: 'https://www.linkedin.com/in/john-example/?trk=feed',
+      innerText: 'John Example'
+    },
+    {
+      cardText: 'Jane Demo\nProduct designer\nFollow',
+      href: '/in/jane-demo/',
+      innerText: 'Jane Demo'
+    }
+  ]), 'https://www.linkedin.com/feed/followers/');
+
+  assert.deepEqual(profiles, [
+    {
+      displayName: 'Jane Demo',
+      handle: 'jane-demo',
+      headline: 'Product designer',
+      profileUrl: 'https://www.linkedin.com/in/jane-demo/',
+      source: 'linkedin'
+    },
+    {
+      displayName: 'John Example',
+      handle: 'john-example',
+      headline: 'Founder',
+      profileUrl: 'https://www.linkedin.com/in/john-example/',
+      source: 'linkedin'
+    }
+  ]);
 });
 
 test('isAllowedHubUrl enforces local-only default and allows explicitly packaged production origins', () => {
@@ -212,6 +282,61 @@ test('handleBackgroundMessage routes capture requests through script injection',
   ]);
   assert.equal(response.ok, true);
   assert.equal(response.profile.handle, 'jane-demo');
+});
+
+test('handleBackgroundMessage routes visible profile imports through script injection', async () => {
+  const calls: Array<{ type: string; payload: any }> = [];
+  const chromeApi = {
+    runtime: {
+      lastError: null as null | { message: string }
+    },
+    scripting: {
+      executeScript(payload: any, callback: () => void) {
+        calls.push({ payload, type: 'executeScript' });
+        chromeApi.runtime.lastError = null;
+        callback();
+      }
+    },
+    tabs: {
+      sendMessage(tabId: number, payload: any, callback: (response: any) => void) {
+        calls.push({ payload: { payload, tabId }, type: 'sendMessage' });
+        chromeApi.runtime.lastError = null;
+        callback([
+          {
+            displayName: 'Jane Demo',
+            handle: 'jane-demo',
+            headline: 'Product designer',
+            profileUrl: 'https://www.linkedin.com/in/jane-demo',
+            source: 'linkedin'
+          }
+        ]);
+      }
+    }
+  };
+
+  const response = await new Promise<any>((resolve) => {
+    const keepAlive = extensionApi.handleBackgroundMessage(chromeApi, { action: 'capture_profiles', tabId: 42 }, resolve);
+    assert.equal(keepAlive, true);
+  });
+
+  assert.deepEqual(calls, [
+    {
+      payload: {
+        files: extensionApi.CAPTURE_SCRIPT_FILES,
+        target: { tabId: 42 }
+      },
+      type: 'executeScript'
+    },
+    {
+      payload: {
+        payload: { action: 'get_profiles' },
+        tabId: 42
+      },
+      type: 'sendMessage'
+    }
+  ]);
+  assert.equal(response.ok, true);
+  assert.equal(response.profiles[0]?.handle, 'jane-demo');
 });
 
 test('registerSidePanelAction enables click-to-open side panel behavior', async () => {

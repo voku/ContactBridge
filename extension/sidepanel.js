@@ -8,6 +8,8 @@ document.addEventListener('DOMContentLoaded', () => {
   const statusDiv = document.getElementById('status');
 
   let currentProfile = null;
+  let currentProfiles = [];
+  let currentCaptureMode = 'profile';
 
   chrome.storage.sync.get(['apiUrl'], (result) => {
     if (result.apiUrl) {
@@ -48,11 +50,23 @@ document.addEventListener('DOMContentLoaded', () => {
     checkCurrentTab();
   }
 
+  function setCaptureButton(label, disabled, onClick) {
+    captureBtn.textContent = label;
+    captureBtn.disabled = disabled;
+    captureBtn.onclick = onClick || null;
+  }
+
   function renderProfileMessage(message) {
     const text = document.createElement('p');
     text.className = 'muted';
     text.textContent = message;
     profileDataDiv.replaceChildren(text);
+  }
+
+  function resetCurrentCapture() {
+    currentProfile = null;
+    currentProfiles = [];
+    currentCaptureMode = 'profile';
   }
 
   function checkCurrentTab() {
@@ -62,10 +76,9 @@ document.addEventListener('DOMContentLoaded', () => {
       const tab = tabs[0];
       const url = tab.url || '';
       if (typeof tab.id !== 'number') {
-        currentProfile = null;
+        resetCurrentCapture();
         renderProfileMessage('Active tab unavailable. Try focusing the page again.');
-        captureBtn.disabled = true;
-        captureBtn.textContent = 'Save this profile';
+        setCaptureButton('Save this profile', true);
         return;
       }
 
@@ -73,52 +86,84 @@ document.addEventListener('DOMContentLoaded', () => {
       if (profileContext.isSupported && profileContext.originPattern) {
         chrome.permissions.contains({ origins: [profileContext.originPattern] }, (hasPermission) => {
           if (hasPermission) {
-            extractData(tab.id);
+            if (profileContext.captureMode === 'overview') {
+              extractBatchData(tab.id);
+            } else {
+              extractData(tab.id);
+            }
           } else {
-            renderProfileMessage(`Click below to allow access to ${profileContext.hostname} and capture this profile.`);
-            captureBtn.textContent = 'Grant Access & Capture';
-            captureBtn.disabled = false;
-            captureBtn.onclick = () => {
+            resetCurrentCapture();
+            renderProfileMessage(
+              profileContext.captureMode === 'overview'
+                ? `Click below to allow access to ${profileContext.hostname} and import the visible profiles on this page.`
+                : `Click below to allow access to ${profileContext.hostname} and capture this profile.`
+            );
+            setCaptureButton(
+              profileContext.captureMode === 'overview' ? 'Grant Access & Import Visible Profiles' : 'Grant Access & Capture',
+              false,
+              () => {
               chrome.permissions.request({ origins: [profileContext.originPattern] }, (granted) => {
                 if (granted) {
-                  captureBtn.textContent = 'Save this profile';
+                  setCaptureButton('Save this profile', true);
                   checkCurrentTab();
                 }
               });
-            };
+            });
           }
         });
       } else {
-        currentProfile = null;
-        renderProfileMessage('Navigate to a supported profile (LinkedIn, X, Bluesky, XING) to capture.');
-        captureBtn.disabled = true;
-        captureBtn.textContent = 'Save this profile';
+        resetCurrentCapture();
+        renderProfileMessage('Navigate to a supported profile or a visible LinkedIn people overview page to capture.');
+        setCaptureButton('Save this profile', true);
       }
     });
   }
 
   function extractData(tabId) {
-    currentProfile = null;
+    resetCurrentCapture();
     renderProfileMessage('Reading profile data...');
-    captureBtn.disabled = true;
+    setCaptureButton('Save this profile', true);
     chrome.runtime.sendMessage({ action: 'capture_profile', tabId }, (response) => {
       if (chrome.runtime.lastError) {
         renderProfileMessage(`Cannot access this page: ${chrome.runtime.lastError.message}`);
-        captureBtn.textContent = 'Save this profile';
+        setCaptureButton('Save this profile', true);
         return;
       }
 
       if (response?.ok && response.profile) {
+        currentCaptureMode = 'profile';
         currentProfile = response.profile;
         renderProfileData(response.profile);
-        captureBtn.disabled = false;
-        captureBtn.textContent = 'Save this profile';
-        captureBtn.onclick = saveProfile;
+        setCaptureButton('Save this profile', false, saveProfile);
         return;
       }
 
       renderProfileMessage(response?.error || 'Could not extract profile data from this page.');
-      captureBtn.textContent = 'Save this profile';
+      setCaptureButton('Save this profile', true);
+    });
+  }
+
+  function extractBatchData(tabId) {
+    resetCurrentCapture();
+    renderProfileMessage('Reading visible profiles...');
+    setCaptureButton('Import visible profiles', true);
+    chrome.runtime.sendMessage({ action: 'capture_profiles', tabId }, (response) => {
+      if (chrome.runtime.lastError) {
+        renderProfileMessage(`Cannot access this page: ${chrome.runtime.lastError.message}`);
+        setCaptureButton('Import visible profiles', true);
+        return;
+      }
+
+      if (response?.ok && Array.isArray(response.profiles) && response.profiles.length > 0) {
+        currentCaptureMode = 'overview';
+        currentProfiles = response.profiles;
+        renderProfileBatchData(response.profiles);
+        setCaptureButton('Import visible profiles', false, saveProfiles);
+        return;
+      }
+
+      renderProfileMessage(response?.error || 'Could not find any visible profiles to import from this page.');
+      setCaptureButton('Import visible profiles', true);
     });
   }
 
@@ -138,8 +183,7 @@ document.addEventListener('DOMContentLoaded', () => {
         capturedAt: new Date().toISOString()
       };
 
-      captureBtn.disabled = true;
-      captureBtn.textContent = 'Saving...';
+      setCaptureButton('Saving...', true);
 
       fetch(`${apiUrl.replace(/(\/)$/, '')}/api/capture/manual`, {
         method: 'POST',
@@ -162,15 +206,64 @@ document.addEventListener('DOMContentLoaded', () => {
           : 'Captured successfully!';
         showStatus(message, false);
         setTimeout(() => {
-          captureBtn.disabled = false;
-          captureBtn.textContent = 'Save this profile';
+          setCaptureButton('Save this profile', false, saveProfile);
           statusDiv.style.display = 'none';
         }, 2000);
       })
       .catch(err => {
         showStatus('Failed: ' + err.message, true);
-        captureBtn.disabled = false;
-        captureBtn.textContent = 'Save this profile';
+        setCaptureButton('Save this profile', false, saveProfile);
+      });
+    });
+  }
+
+  function saveProfiles() {
+    if (!currentProfiles.length) return;
+
+    chrome.storage.sync.get(['apiUrl'], (result) => {
+      const hubUrl = extensionApi.isAllowedHubUrl(result.apiUrl);
+      if (!hubUrl.ok) {
+        showStatus(hubUrl.error, true);
+        return;
+      }
+
+      const apiUrl = hubUrl.url;
+      const capturedAt = new Date().toISOString();
+      setCaptureButton('Importing...', true);
+
+      fetch(`${apiUrl.replace(/(\/)$/, '')}/api/capture/manual/batch`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          profiles: currentProfiles.map((profile) => ({
+            ...profile,
+            capturedAt
+          }))
+        })
+      })
+      .then(res => {
+        if (!res.ok) {
+          return res.json()
+            .catch(() => ({ error: 'Network error' }))
+            .then((payload) => {
+              throw new Error(payload.error || 'Network error');
+            });
+        }
+        return res.json();
+      })
+      .then(data => {
+        const message = data.successCount === 1
+          ? 'Imported 1 visible profile. Review it in ContactBridge before approving.'
+          : `Imported ${data.successCount} visible profiles. Review them in ContactBridge before approving.`;
+        showStatus(message, false);
+        setTimeout(() => {
+          setCaptureButton('Import visible profiles', false, saveProfiles);
+          statusDiv.style.display = 'none';
+        }, 2500);
+      })
+      .catch(err => {
+        showStatus('Failed: ' + err.message, true);
+        setCaptureButton('Import visible profiles', false, saveProfiles);
       });
     });
   }
@@ -217,6 +310,25 @@ document.addEventListener('DOMContentLoaded', () => {
 
     if (profile.headline) {
       appendProfileRow('', profile.headline, { muted: true, marginTop: '12px' });
+    }
+  }
+
+  function renderProfileBatchData(profiles) {
+    profileDataDiv.replaceChildren();
+    appendProfileRow('Source', profiles[0]?.source || 'linkedin', { capitalize: true });
+    appendProfileRow('Visible profiles', String(profiles.length));
+
+    profiles.slice(0, 4).forEach((profile, index) => {
+      appendProfileRow(index === 0 ? 'Preview' : '', profile.displayName || profile.handle || 'Not available', {
+        marginTop: index === 0 ? '12px' : undefined
+      });
+      if (profile.headline) {
+        appendProfileRow('', profile.headline, { muted: true });
+      }
+    });
+
+    if (profiles.length > 4) {
+      appendProfileRow('', `+${profiles.length - 4} more visible profiles`, { muted: true, marginTop: '12px' });
     }
   }
 
