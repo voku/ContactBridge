@@ -1692,7 +1692,8 @@ test('database restore stays blocked in hosted mode', async (t) => {
   assert.equal(response.status, 403);
 });
 
-test('cors enforces hosted allowlist, rejects hosted no-origin, and allows loopback in local mode', async (t) => {
+test('cors enforces hosted allowlist, rejects extension origins in hosted mode, and allows loopback plus local extensions in local mode', async (t) => {
+  const chromeExtensionOrigin = 'chrome-extension://abcdefghijklmnopabcdefghijklmnop';
   const hostedServer = await startServer({
     appMode: 'hosted',
     nodeEnv: 'production',
@@ -1715,6 +1716,12 @@ test('cors enforces hosted allowlist, rejects hosted no-origin, and allows loopb
   assert.equal(rejectedHostedResponse.ok, false);
   assert.ok(rejectedHostedResponse.status >= 400);
 
+  const rejectedHostedExtensionResponse = await fetch(`${hostedServer.baseUrl}/api/health`, {
+    headers: { Origin: chromeExtensionOrigin }
+  });
+  assert.equal(rejectedHostedExtensionResponse.ok, false);
+  assert.ok(rejectedHostedExtensionResponse.status >= 400);
+
   const noOriginHostedResponse = await fetch(`${hostedServer.baseUrl}/api/health`);
   assert.equal(noOriginHostedResponse.ok, false);
   assert.ok(noOriginHostedResponse.status >= 400);
@@ -1725,6 +1732,24 @@ test('cors enforces hosted allowlist, rejects hosted no-origin, and allows loopb
     headers: { Origin: 'http://localhost:5173' }
   });
   assert.equal(loopbackLocalResponse.ok, true);
+  assert.equal(loopbackLocalResponse.headers.get('access-control-allow-origin'), 'http://localhost:5173');
+
+  const extensionHealthResponse = await fetch(`${localServer.baseUrl}/api/extension/health`, {
+    headers: { Origin: chromeExtensionOrigin }
+  });
+  assert.equal(extensionHealthResponse.ok, true);
+  assert.equal(extensionHealthResponse.headers.get('access-control-allow-origin'), chromeExtensionOrigin);
+
+  const extensionPreflightResponse = await fetch(`${localServer.baseUrl}/api/capture/manual`, {
+    method: 'OPTIONS',
+    headers: {
+      Origin: chromeExtensionOrigin,
+      'Access-Control-Request-Method': 'POST',
+      'Access-Control-Request-Headers': 'content-type'
+    }
+  });
+  assert.equal(extensionPreflightResponse.ok, true);
+  assert.equal(extensionPreflightResponse.headers.get('access-control-allow-origin'), chromeExtensionOrigin);
 });
 
 test('x sync migrates legacy auth_data into encrypted secrets and reuses encrypted credentials', async (t) => {
