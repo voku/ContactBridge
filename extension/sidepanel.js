@@ -22,8 +22,8 @@ document.addEventListener('DOMContentLoaded', () => {
     }
   });
 
-  saveConfigBtn.addEventListener('click', () => {
-    const hubUrl = extensionApi.isAllowedHubUrl(apiUrlInput.value);
+  saveConfigBtn.addEventListener('click', async () => {
+    const hubUrl = await extensionApi.validateHubHealth(apiUrlInput.value);
     if (!hubUrl.ok) {
       showStatus(hubUrl.error, true);
       return;

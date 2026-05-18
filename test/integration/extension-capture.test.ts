@@ -21,6 +21,17 @@ const extensionApi = (globalThis as typeof globalThis & {
       profileUrl: string;
       source: string;
     };
+    isAllowedHubUrl: (
+      url: string,
+      options?: { productionHubOrigins?: Set<string> }
+    ) => { error: string; ok: boolean; url: string };
+    validateHubHealth: (
+      hubUrl: string,
+      fetchImpl?: (url: string, options?: Record<string, unknown>) => Promise<{
+        ok: boolean;
+        json: () => Promise<Record<string, unknown>>;
+      }>
+    ) => Promise<{ error: string; ok: boolean; url: string }>;
     handleBackgroundMessage: (
       chromeApi: any,
       request: { action?: string; tabId?: number },
@@ -84,6 +95,57 @@ test('extractProfileFromDocument reuses shared selectors for supported networks'
     profileUrl: 'https://www.xing.com/profile/Jane_Example',
     source: 'xing'
   });
+});
+
+test('isAllowedHubUrl enforces local-only default and allows explicitly packaged production origins', () => {
+  assert.deepEqual(extensionApi.isAllowedHubUrl('http://localhost:3000'), {
+    error: '',
+    ok: true,
+    url: 'http://localhost:3000'
+  });
+
+  const rejectedUnknownHub = extensionApi.isAllowedHubUrl('https://unknown.example.test');
+  assert.equal(rejectedUnknownHub.ok, false);
+  assert.match(rejectedUnknownHub.error, /only sends captures to local ContactBridge hubs/i);
+
+  const allowedPackagedHub = extensionApi.isAllowedHubUrl('https://hub.example.test', {
+    productionHubOrigins: new Set(['https://hub.example.test'])
+  });
+  assert.deepEqual(allowedPackagedHub, {
+    error: '',
+    ok: true,
+    url: 'https://hub.example.test'
+  });
+});
+
+test('validateHubHealth accepts compatible hubs and rejects incompatible ones', async () => {
+  const okResponse = await extensionApi.validateHubHealth(
+    'http://localhost:3000',
+    async () => ({
+      ok: true,
+      json: async () => ({
+        appName: 'ContactBridge',
+        appMode: 'local',
+        capabilities: ['capture.manual.v1']
+      })
+    })
+  );
+  assert.equal(okResponse.ok, true);
+  assert.equal(okResponse.url, 'http://localhost:3000');
+
+  const badResponse = await extensionApi.validateHubHealth(
+    'http://localhost:3000',
+    async () => ({
+      ok: true,
+      json: async () => ({
+        appName: 'Not-ContactBridge',
+        appMode: 'local',
+        capabilities: []
+      })
+    })
+  );
+  assert.equal(badResponse.ok, false);
+  assert.match(badResponse.error, /does not look like a compatible ContactBridge hub/i);
 });
 
 test('handleBackgroundMessage routes capture requests through script injection', async () => {

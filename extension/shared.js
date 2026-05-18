@@ -23,9 +23,10 @@
 
   // Add reviewed production hub origins here before packaging a hosted extension build.
   // Values must be origins with protocol and host, for example: 'https://contactbridge.example.com'.
-  const ALLOWED_PRODUCTION_HUB_ORIGINS = new Set([]);
+  const PACKAGED_PRODUCTION_HUB_ORIGINS = Object.freeze([]);
+  const ALLOWED_PRODUCTION_HUB_ORIGINS = new Set(PACKAGED_PRODUCTION_HUB_ORIGINS);
 
-  const isAllowedHubUrl = (url) => {
+  const isAllowedHubUrl = (url, options = {}) => {
     if (typeof url !== 'string' || !url.trim()) {
       return { error: 'Enter a ContactBridge Hub URL.', ok: false, url: '' };
     }
@@ -41,10 +42,13 @@
     parsedUrl.hash = '';
 
     const hostname = parsedUrl.hostname.toLowerCase();
+    const productionHubOrigins = options.productionHubOrigins instanceof Set
+      ? options.productionHubOrigins
+      : ALLOWED_PRODUCTION_HUB_ORIGINS;
     const isLocalHub = parsedUrl.protocol === 'http:'
       && (hostname === 'localhost' || hostname === '127.0.0.1' || hostname === '[::1]');
     const isConfiguredProductionHub = parsedUrl.protocol === 'https:'
-      && ALLOWED_PRODUCTION_HUB_ORIGINS.has(parsedUrl.origin);
+      && productionHubOrigins.has(parsedUrl.origin);
 
     if (!isLocalHub && !isConfiguredProductionHub) {
       return {
@@ -55,6 +59,49 @@
     }
 
     return { error: '', ok: true, url: parsedUrl.origin };
+  };
+
+  const validateHubHealth = async (hubUrl, fetchImpl = fetch) => {
+    const allowedHubUrl = isAllowedHubUrl(hubUrl);
+    if (!allowedHubUrl.ok) {
+      return allowedHubUrl;
+    }
+
+    try {
+      const response = await fetchImpl(`${allowedHubUrl.url}/api/extension/health`, {
+        headers: { Accept: 'application/json' }
+      });
+      if (!response.ok) {
+        return {
+          error: 'Hub validation failed. Make sure this ContactBridge hub is running and reachable.',
+          ok: false,
+          url: ''
+        };
+      }
+
+      const payload = await response.json();
+      const hasValidShape = payload
+        && payload.appName === 'ContactBridge'
+        && typeof payload.appMode === 'string'
+        && Array.isArray(payload.capabilities)
+        && payload.capabilities.includes('capture.manual.v1');
+
+      if (!hasValidShape) {
+        return {
+          error: 'Hub validation failed. This URL does not look like a compatible ContactBridge hub.',
+          ok: false,
+          url: ''
+        };
+      }
+
+      return { error: '', ok: true, url: allowedHubUrl.url };
+    } catch {
+      return {
+        error: 'Hub validation failed. Could not reach the ContactBridge hub health endpoint.',
+        ok: false,
+        url: ''
+      };
+    }
   };
 
   const getElementText = (doc, selector) => trimText(doc?.querySelector?.(selector)?.innerText || '');
@@ -229,6 +276,7 @@
     extractProfileFromDocument,
     getProfileContext,
     isAllowedHubUrl,
+    validateHubHealth,
     handleBackgroundMessage,
     requestCapturedProfile
   };

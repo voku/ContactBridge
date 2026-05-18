@@ -119,6 +119,26 @@ try {
   // column might already exist
 }
 
+sqlite.exec(`
+  CREATE UNIQUE INDEX IF NOT EXISTS idx_social_profiles_source_identity
+    ON social_profiles(source_type, source_profile_id)
+    WHERE source_profile_id IS NOT NULL;
+  CREATE UNIQUE INDEX IF NOT EXISTS idx_contact_candidate_profiles_unique_pair
+    ON contact_candidate_profiles(contact_candidate_id, social_profile_id);
+  CREATE INDEX IF NOT EXISTS idx_contact_candidates_status
+    ON contact_candidates(status);
+  CREATE INDEX IF NOT EXISTS idx_social_profiles_handle
+    ON social_profiles(handle);
+  CREATE INDEX IF NOT EXISTS idx_relationship_edges_source_account_id
+    ON relationship_edges(source_account_id);
+  CREATE INDEX IF NOT EXISTS idx_relationship_edges_social_profile_id
+    ON relationship_edges(social_profile_id);
+  CREATE INDEX IF NOT EXISTS idx_candidate_match_evidence_candidate_id
+    ON candidate_match_evidence(candidate_id);
+  CREATE INDEX IF NOT EXISTS idx_candidate_match_evidence_profile_id
+    ON candidate_match_evidence(profile_id);
+`);
+
 export const db = drizzle(sqlite, { schema });
 
 const loadDemoFixture = async <T>(integration: string): Promise<T | null> => {
@@ -211,11 +231,27 @@ const normalizeMastodonInstanceUrl = (instance: string) => {
 const MANUAL_CAPTURE_SOURCES = new Set(['bluesky', 'linkedin', 'x', 'xing']);
 const OAUTH_STATE_TTL_MS = 10 * 60 * 1000;
 const VALID_APP_MODES = new Set(['local', 'hosted', 'test']);
-const DEFAULT_APP_MODE = process.env.NODE_ENV === 'test' ? 'test' : 'local';
+const DEFAULT_APP_MODE = process.env.NODE_ENV === 'test'
+  ? 'test'
+  : process.env.NODE_ENV === 'development'
+    ? 'local'
+    : 'hosted';
 const requestedAppMode = (process.env.APP_MODE || DEFAULT_APP_MODE).toLowerCase();
-const APP_MODE = VALID_APP_MODES.has(requestedAppMode) ? requestedAppMode : DEFAULT_APP_MODE;
-const isLocalMode = APP_MODE === 'local' || APP_MODE === 'test';
+if (!VALID_APP_MODES.has(requestedAppMode)) {
+  throw new Error(`Invalid APP_MODE "${requestedAppMode}". Expected one of: local, test, hosted.`);
+}
+const APP_MODE = requestedAppMode;
+const isTestMode = APP_MODE === 'test';
+const isHostedMode = APP_MODE === 'hosted';
+const allowsLocalOnlyRoutes = !isHostedMode;
 const SECRET_ENCRYPTION_VERSION = 1;
+const EXTENSION_HEALTH_CAPABILITIES = Object.freeze([
+  'capture.manual.v1',
+  'profiles.linkedin',
+  'profiles.x',
+  'profiles.bluesky',
+  'profiles.xing'
+]);
 
 const parseOriginList = (value: string | undefined) => (value || '')
   .split(',')
@@ -255,7 +291,7 @@ const getCorsAllowedOrigins = () => {
 const getSecretKeyMaterial = () => {
   const configured = process.env.CONTACTBRIDGE_SECRET_KEY?.trim();
   if (configured) return configured;
-  if (!isLocalMode) {
+  if (isHostedMode) {
     throw new Error('CONTACTBRIDGE_SECRET_KEY is required to store or read encrypted source account secrets in hosted mode.');
   }
 
@@ -278,6 +314,12 @@ const getSecretKeyMaterial = () => {
 };
 
 const getSecretEncryptionKey = () => crypto.createHash('sha256').update(getSecretKeyMaterial()).digest();
+const ensureStartupModeRequirements = () => {
+  if (isHostedMode && !process.env.CONTACTBRIDGE_SECRET_KEY?.trim()) {
+    throw new Error('CONTACTBRIDGE_SECRET_KEY is required at startup when APP_MODE=hosted.');
+  }
+};
+ensureStartupModeRequirements();
 
 
 const trimMaybeString = (value: unknown) => typeof value === 'string' ? value.trim() : '';
@@ -517,6 +559,14 @@ const getStoredSourceAccountAuth = (sourceAccountId: string) => {
   const encryptedAuthData = secret ? decryptSecretPayload(secret.encryptedPayload) : null;
   const legacyAuthData = encryptedAuthData ? null : parseSourceAccountAuthData(account.authData);
 
+  if (!encryptedAuthData && legacyAuthData) {
+    try {
+      storeSourceAccountAuth(sourceAccountId, legacyAuthData);
+    } catch {
+      // Keep fallback behavior if migration cannot be written in this request path.
+    }
+  }
+
   return { account, authData: encryptedAuthData || legacyAuthData };
 };
 
@@ -742,6 +792,70 @@ const addCandidateMatchEvidence = (
   }).run();
 };
 
+const insertCandidateProfileLink = (candidateId: string, socialProfileId: string) => {
+  sqlite.prepare(`
+    INSERT OR IGNORE INTO contact_candidate_profiles (contact_candidate_id, social_profile_id)
+    VALUES (?, ?)
+  `).run(candidateId, socialProfileId);
+};
+
+const getProfileUrlForExport = (profile: typeof schema.socialProfiles.$inferSelect) => {
+  if (profile.profileUrl) {
+    return profile.profileUrl;
+  }
+
+  try {
+    const raw = profile.rawPublicPayloadJson ? JSON.parse(profile.rawPublicPayloadJson) : {};
+    if (profile.sourceType === 'mastodon' && typeof raw.url === 'string') return raw.url;
+    if (profile.sourceType === 'github' && typeof raw.html_url === 'string') return raw.html_url;
+  } catch {
+    // Ignore invalid payload
+  }
+
+  switch (profile.sourceType?.toLowerCase()) {
+    case 'github': return profile.handle ? `https://github.com/${profile.handle}` : '';
+    case 'x': return profile.handle ? `https://x.com/${profile.handle}` : '';
+    case 'twitter': return profile.handle ? `https://x.com/${profile.handle}` : '';
+    case 'bluesky': return profile.handle ? `https://bsky.app/profile/${profile.handle}` : '';
+    case 'linkedin': return profile.handle ? `https://linkedin.com/in/${profile.handle}` : '';
+    case 'xing': return profile.handle ? `https://www.xing.com/profile/${profile.handle}` : '';
+    default: return '';
+  }
+};
+
+const toCsvCell = (value: unknown) => {
+  const stringValue = value === null || value === undefined ? '' : String(value);
+  return `"${stringValue.replace(/"/g, '""')}"`;
+};
+
+const toVCardText = (value: unknown) => {
+  return String(value ?? '')
+    .replace(/\\/g, '\\\\')
+    .replace(/\r\n|\n|\r/g, '\\n')
+    .replace(/;/g, '\\;')
+    .replace(/,/g, '\\,');
+};
+
+const getApprovedCandidatesForExport = () => {
+  const approvedCandidates = db.select().from(schema.contactCandidates)
+    .where(eq(schema.contactCandidates.status, 'approved'))
+    .all();
+
+  return approvedCandidates.map((candidate) => {
+    const candidateProfiles = db.select().from(schema.contactCandidateProfiles)
+      .where(eq(schema.contactCandidateProfiles.contactCandidateId, candidate.id))
+      .all();
+
+    const profiles = candidateProfiles
+      .map((candidateProfile) => db.select().from(schema.socialProfiles)
+        .where(eq(schema.socialProfiles.id, candidateProfile.socialProfileId as string))
+        .get())
+      .filter((profile): profile is typeof schema.socialProfiles.$inferSelect => Boolean(profile));
+
+    return { ...candidate, profiles };
+  });
+};
+
 function assignProfileToCandidate(profileIdToUse: string, displayName: string, handle: string, now: Date) {
   const normalizedHandle = normalizeProfileHandle(handle);
   const existingCandidateProfile = db.select().from(schema.contactCandidateProfiles)
@@ -758,7 +872,37 @@ function assignProfileToCandidate(profileIdToUse: string, displayName: string, h
   let matchedCandidateId: string | null = null;
   const reviewEvidence: Array<{ evidenceType: string; evidenceValue: string; score: number }> = [];
 
-  if (currentProfile?.sourceType && normalizedHandle) {
+  if (currentProfile?.sourceType && currentProfile.sourceProfileId) {
+    const sameSourceIdentityProfiles = db.select().from(schema.socialProfiles)
+      .where(and(
+        eq(schema.socialProfiles.sourceType, currentProfile.sourceType),
+        eq(schema.socialProfiles.sourceProfileId, currentProfile.sourceProfileId)
+      )).all();
+
+    for (const profile of sameSourceIdentityProfiles) {
+      if (profile.id === profileIdToUse) continue;
+      const candidateProfile = db.select().from(schema.contactCandidateProfiles)
+        .where(eq(schema.contactCandidateProfiles.socialProfileId, profile.id))
+        .get();
+      if (candidateProfile?.contactCandidateId) {
+        matchedCandidateId = candidateProfile.contactCandidateId;
+        addCandidateMatchEvidence(
+          matchedCandidateId,
+          profileIdToUse,
+          'same_source_profile_id',
+          serializeCandidateEvidenceValue({
+            sourceType: currentProfile.sourceType,
+            sourceProfileId: currentProfile.sourceProfileId
+          }),
+          100,
+          now
+        );
+        break;
+      }
+    }
+  }
+
+  if (!matchedCandidateId && currentProfile?.sourceType && normalizedHandle) {
     const sameSourceHandleProfiles = db.select().from(schema.socialProfiles)
       .where(and(
         eq(schema.socialProfiles.sourceType, currentProfile.sourceType),
@@ -767,12 +911,20 @@ function assignProfileToCandidate(profileIdToUse: string, displayName: string, h
 
     for (const profile of sameSourceHandleProfiles) {
       if (profile.id === profileIdToUse) continue;
+      if (profile.sourceProfileId && currentProfile.sourceProfileId && profile.sourceProfileId === currentProfile.sourceProfileId) continue;
       const candidateProfile = db.select().from(schema.contactCandidateProfiles)
         .where(eq(schema.contactCandidateProfiles.socialProfileId, profile.id))
         .get();
       if (candidateProfile?.contactCandidateId) {
-        matchedCandidateId = candidateProfile.contactCandidateId;
-        addCandidateMatchEvidence(matchedCandidateId, profileIdToUse, 'same_source_handle', normalizedHandle, 90, now);
+        reviewEvidence.push({
+          evidenceType: 'same_source_handle_profile_id_mismatch_review',
+          evidenceValue: serializeCandidateEvidenceValue({
+            candidateId: candidateProfile.contactCandidateId,
+            handle: normalizedHandle,
+            sourceType: currentProfile.sourceType
+          }),
+          score: 60
+        });
         break;
       }
     }
@@ -810,10 +962,7 @@ function assignProfileToCandidate(profileIdToUse: string, displayName: string, h
   }
 
   if (matchedCandidateId) {
-    db.insert(schema.contactCandidateProfiles).values({
-      contactCandidateId: matchedCandidateId,
-      socialProfileId: profileIdToUse
-    }).run();
+    insertCandidateProfileLink(matchedCandidateId, profileIdToUse);
     return;
   }
 
@@ -827,10 +976,7 @@ function assignProfileToCandidate(profileIdToUse: string, displayName: string, h
     updatedAt: now
   }).run();
 
-  db.insert(schema.contactCandidateProfiles).values({
-    contactCandidateId: candidateId,
-    socialProfileId: profileIdToUse
-  }).run();
+  insertCandidateProfileLink(candidateId, profileIdToUse);
 
   for (const evidence of reviewEvidence) {
     addCandidateMatchEvidence(candidateId, profileIdToUse, evidence.evidenceType, evidence.evidenceValue, evidence.score, now);
@@ -845,7 +991,7 @@ async function startServer() {
 
   app.use(cors({
     origin: (origin, callback) => {
-      if ((!origin && isLocalMode) || (origin && (corsAllowedOrigins.has(origin) || (isLocalMode && isLoopbackOrigin(origin))))) {
+      if ((!origin && allowsLocalOnlyRoutes) || (origin && (corsAllowedOrigins.has(origin) || (allowsLocalOnlyRoutes && isLoopbackOrigin(origin))))) {
         callback(null, true);
         return;
       }
@@ -860,8 +1006,16 @@ async function startServer() {
     res.json({ status: "ok", appMode: APP_MODE });
   });
 
+  app.get('/api/extension/health', (req, res) => {
+    res.json({
+      appMode: APP_MODE,
+      appName: 'ContactBridge',
+      capabilities: EXTENSION_HEALTH_CAPABILITIES
+    });
+  });
+
   app.delete("/api/database", (req, res) => {
-    if (!isLocalMode) {
+    if (!allowsLocalOnlyRoutes) {
       return res.status(403).json({ error: "Database reset is only available in local or test mode." });
     }
 
@@ -983,6 +1137,80 @@ async function startServer() {
     res.json(candidatesWithProfiles);
   });
 
+  app.get('/api/exports/contacts.json', (req, res) => {
+    const approvedCandidates = getApprovedCandidatesForExport();
+    res.setHeader('Content-Type', 'application/json; charset=utf-8');
+    res.setHeader('Content-Disposition', 'attachment; filename="contacts.json"');
+    res.send(JSON.stringify(approvedCandidates, null, 2));
+  });
+
+  app.get('/api/exports/contacts.csv', (req, res) => {
+    const approvedCandidates = getApprovedCandidatesForExport();
+    const rows: string[] = ['Name,Source,Handle,Profile URL,Notes'];
+
+    for (const candidate of approvedCandidates) {
+      const candidateName = candidate.canonicalName || 'Unknown';
+      const candidateNotes = candidate.notes || '';
+      if (candidate.profiles.length === 0) {
+        rows.push([
+          toCsvCell(candidateName),
+          toCsvCell(''),
+          toCsvCell(''),
+          toCsvCell(''),
+          toCsvCell(candidateNotes)
+        ].join(','));
+        continue;
+      }
+
+      for (const profile of candidate.profiles) {
+        rows.push([
+          toCsvCell(candidateName),
+          toCsvCell(profile.sourceType || ''),
+          toCsvCell(profile.handle || ''),
+          toCsvCell(getProfileUrlForExport(profile)),
+          toCsvCell(candidateNotes)
+        ].join(','));
+      }
+    }
+
+    res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+    res.setHeader('Content-Disposition', 'attachment; filename="contacts.csv"');
+    res.send(rows.join('\n'));
+  });
+
+  app.get('/api/exports/contacts.vcf', (req, res) => {
+    const approvedCandidates = getApprovedCandidatesForExport();
+    const cards: string[] = [];
+
+    for (const candidate of approvedCandidates) {
+      const candidateName = toVCardText(candidate.canonicalName || 'Unknown');
+      const lines = [
+        'BEGIN:VCARD',
+        'VERSION:3.0',
+        `FN:${candidateName}`,
+        `N:${candidateName};;;;`
+      ];
+
+      if (candidate.notes) {
+        lines.push(`NOTE:${toVCardText(candidate.notes)}`);
+      }
+
+      for (const profile of candidate.profiles) {
+        const profileUrl = getProfileUrlForExport(profile);
+        if (profileUrl) {
+          lines.push(`URL:${toVCardText(profileUrl)}`);
+        }
+      }
+
+      lines.push('END:VCARD');
+      cards.push(lines.join('\r\n'));
+    }
+
+    res.setHeader('Content-Type', 'text/vcard; charset=utf-8');
+    res.setHeader('Content-Disposition', 'attachment; filename="contacts.vcf"');
+    res.send(cards.join('\r\n'));
+  });
+
   app.post("/api/candidates/merge", (req, res) => {
     try {
       const { primaryCandidateId, secondaryCandidateIds } = req.body;
@@ -1024,8 +1252,18 @@ async function startServer() {
 
         for (const id of secondaryCandidateIds) {
           if (id === primaryCandidateId) continue;
-          db.update(schema.contactCandidateProfiles)
-            .set({ contactCandidateId: primaryCandidateId })
+          const secondaryLinks = db.select({ socialProfileId: schema.contactCandidateProfiles.socialProfileId })
+            .from(schema.contactCandidateProfiles)
+            .where(eq(schema.contactCandidateProfiles.contactCandidateId, id))
+            .all();
+
+          for (const link of secondaryLinks) {
+            if (link.socialProfileId) {
+              insertCandidateProfileLink(primaryCandidateId, link.socialProfileId);
+            }
+          }
+
+          db.delete(schema.contactCandidateProfiles)
             .where(eq(schema.contactCandidateProfiles.contactCandidateId, id))
             .run();
 

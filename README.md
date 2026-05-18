@@ -1,6 +1,6 @@
 # ContactBridge
 
-ContactBridge is a privacy-first social contact hub for local-first use. It imports profiles from supported sources, groups them into reviewable candidates, supports manual profile capture from LinkedIn, X, Bluesky, and XING, and exports approved contacts as CSV, JSON, or vCard files.
+ContactBridge is a privacy-first social contact hub for local-first beta use. It imports profiles from supported sources, groups them into reviewable candidates, supports manual profile capture from LinkedIn, X, Bluesky, and XING, and exports approved contacts as CSV, JSON, or vCard files.
 
 ## Features
 
@@ -42,7 +42,7 @@ The local development server runs the Express backend and serves the Vite fronte
 
 3. Set the values you need:
 
-   - `APP_MODE`: `local`, `test`, or `hosted`; defaults to `local` outside tests
+   - `APP_MODE`: `local`, `test`, or `hosted`; defaults to `test` when `NODE_ENV=test`, `local` when `NODE_ENV=development`, and `hosted` otherwise
    - `APP_URL`: public backend URL used for OAuth callbacks
    - `CONTACTBRIDGE_CORS_ORIGINS`: comma-separated frontend origins allowed to call the API when hosted
    - `CONTACTBRIDGE_SECRET_KEY`: required in hosted mode to encrypt provider tokens
@@ -114,6 +114,12 @@ Use this checklist when you are ready to move ContactBridge from local or stagin
     - export contacts
 13. Keep the previous deployment and database backup until the live instance has been stable long enough for you to roll back safely if needed.
 
+Hosted mode fails closed at startup:
+
+- Invalid `APP_MODE` values stop startup
+- `CONTACTBRIDGE_SECRET_KEY` is required before startup completes
+- CORS requires an explicit origin allowlist and rejects no-origin requests
+
 ### GitHub Pages frontend deployment
 
 This repository includes a GitHub Actions workflow that deploys the Vite frontend to GitHub Pages on pushes to `main`.
@@ -132,7 +138,17 @@ If you fork this repository, update `.github/workflows/deploy-pages.yml` and the
 
 ## Browser extension
 
-The Chrome extension lives in `extension/` and supports manual capture from LinkedIn, X, Bluesky, and XING. By default it only sends captured profile data to local hubs such as `http://localhost:3000`; production hub origins must be explicitly packaged into the extension before distribution.
+The Chrome extension lives in `extension/` and supports manual capture from LinkedIn, X, Bluesky, and XING. By default it only sends captured profile data to local hubs such as `http://localhost:3000`; production hub origins must be explicitly packaged into the extension before distribution. Before saving a hub URL, the extension validates `${hub}/api/extension/health` to confirm the target is a compatible ContactBridge hub.
+
+## Export API endpoints
+
+Frontend export buttons download server-generated files from:
+
+- `GET /api/exports/contacts.csv`
+- `GET /api/exports/contacts.json`
+- `GET /api/exports/contacts.vcf`
+
+Only approved candidates are exported.
 
 To load it locally:
 
@@ -158,3 +174,7 @@ npm run test:integration
 npm run lint
 npm run build
 ```
+
+## Local-first beta boundaries
+
+See `docs/LOCAL_FIRST_BETA.md` for what is currently safe in local usage, what is not yet safe for hosted multi-user usage, and what remains before public hosted rollout.
