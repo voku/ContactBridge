@@ -113,7 +113,7 @@ const ExtensionSetupDialog = ({ triggerLabel = 'Extension Setup' }: { triggerLab
           <li>Open Chrome and navigate to <strong>chrome://extensions</strong></li>
           <li>Enable <strong>Developer mode</strong> in the top right.</li>
           <li>Click <strong>Load unpacked</strong> and select the <code>extension</code> folder.</li>
-          <li>Click the extension icon in Chrome to open the Side Panel.</li>
+          <li>Click the ContactBridge extension button in Chrome (pin it first if it is only visible in the extensions menu) to open the Side Panel.</li>
           <li>Enter the following local hub URL when prompted:</li>
         </ol>
         <div className="bg-gray-100 p-3 rounded-md flex items-center justify-between">

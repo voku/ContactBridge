@@ -258,6 +258,38 @@
     });
   };
 
+  const registerSidePanelAction = (chromeApi, logger = console) => {
+    if (!chromeApi?.sidePanel) {
+      return;
+    }
+
+    if (typeof chromeApi.sidePanel.setPanelBehavior === 'function') {
+      Promise.resolve(
+        chromeApi.sidePanel.setPanelBehavior({ openPanelOnAction: true })
+      ).catch((error) => {
+        logger?.error?.('Failed to enable side panel action behavior:', error);
+      });
+    }
+
+    if (
+      typeof chromeApi.sidePanel.open === 'function'
+      && chromeApi.action?.onClicked
+      && typeof chromeApi.action.onClicked.addListener === 'function'
+    ) {
+      chromeApi.action.onClicked.addListener((tab) => {
+        const windowId = tab?.windowId;
+        if (!Number.isInteger(windowId)) {
+          logger?.warn?.('Cannot open ContactBridge side panel without a browser window.');
+          return;
+        }
+
+        Promise.resolve(chromeApi.sidePanel.open({ windowId })).catch((error) => {
+          logger?.error?.('Failed to open ContactBridge side panel:', error);
+        });
+      });
+    }
+  };
+
   const handleBackgroundMessage = (chromeApi, request, sendResponse) => {
     if (request?.action !== 'capture_profile') {
       return false;
@@ -279,6 +311,7 @@
     isAllowedHubUrl,
     validateHubHealth,
     handleBackgroundMessage,
+    registerSidePanelAction,
     requestCapturedProfile
   };
 })();

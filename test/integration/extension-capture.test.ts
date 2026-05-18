@@ -37,6 +37,7 @@ const extensionApi = (globalThis as typeof globalThis & {
       request: { action?: string; tabId?: number },
       sendResponse: (response: any) => void
     ) => boolean;
+    registerSidePanelAction: (chromeApi: any, logger?: { error?: (...args: any[]) => void; warn?: (...args: any[]) => void }) => void;
   };
 }).ContactBridgeExtension;
 
@@ -211,6 +212,80 @@ test('handleBackgroundMessage routes capture requests through script injection',
   ]);
   assert.equal(response.ok, true);
   assert.equal(response.profile.handle, 'jane-demo');
+});
+
+test('registerSidePanelAction enables click-to-open side panel behavior', async () => {
+  const calls: Array<{ type: string; payload: any }> = [];
+  let actionClickListener: ((tab: { windowId?: number }) => void) | null = null;
+  const chromeApi = {
+    action: {
+      onClicked: {
+        addListener(listener: (tab: { windowId?: number }) => void) {
+          actionClickListener = listener;
+        }
+      }
+    },
+    sidePanel: {
+      open(payload: { windowId: number }) {
+        calls.push({ payload, type: 'open' });
+        return Promise.resolve();
+      },
+      setPanelBehavior(payload: { openPanelOnAction: boolean }) {
+        calls.push({ payload, type: 'setPanelBehavior' });
+        return Promise.resolve();
+      }
+    }
+  };
+
+  extensionApi.registerSidePanelAction(chromeApi);
+  assert.ok(actionClickListener);
+  actionClickListener?.({ windowId: 9 });
+  await new Promise((resolve) => setTimeout(resolve, 0));
+
+  assert.deepEqual(calls, [
+    {
+      payload: { openPanelOnAction: true },
+      type: 'setPanelBehavior'
+    },
+    {
+      payload: { windowId: 9 },
+      type: 'open'
+    }
+  ]);
+});
+
+test('registerSidePanelAction warns when no browser window is available', async () => {
+  let actionClickListener: ((tab: { windowId?: number }) => void) | null = null;
+  const warnings: string[] = [];
+  const chromeApi = {
+    action: {
+      onClicked: {
+        addListener(listener: (tab: { windowId?: number }) => void) {
+          actionClickListener = listener;
+        }
+      }
+    },
+    sidePanel: {
+      open() {
+        throw new Error('sidePanel.open should not run without a window id');
+      },
+      setPanelBehavior() {
+        return Promise.resolve();
+      }
+    }
+  };
+
+  extensionApi.registerSidePanelAction(chromeApi, {
+    warn(message: string) {
+      warnings.push(message);
+    }
+  });
+  actionClickListener?.({});
+  await new Promise((resolve) => setTimeout(resolve, 0));
+
+  assert.deepEqual(warnings, [
+    'Cannot open ContactBridge side panel without a browser window.'
+  ]);
 });
 
 test('extractProfileFromDocument returns unknown for unsupported pages', () => {

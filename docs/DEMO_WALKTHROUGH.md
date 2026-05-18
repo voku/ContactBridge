@@ -71,7 +71,7 @@ Load the extension unpacked:
 2. Enable **Developer mode**
 3. Click **Load unpacked**
 4. Select the repository `extension/` directory
-5. Open the side panel and set the hub URL to `http://localhost:3000`
+5. Click the ContactBridge extension button (pin it first if it only appears in the browser extensions menu) to open the side panel, then set the hub URL to `http://localhost:3000`
 
 Then visit one supported profile page and capture it manually:
 
