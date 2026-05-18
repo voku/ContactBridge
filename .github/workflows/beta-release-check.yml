@@ -1,0 +1,67 @@
+name: Beta release verification
+
+on:
+  push:
+    branches:
+      - main
+      - 'copilot/**'
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  verify-beta:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run integration tests
+        run: npm run test:integration
+
+      - name: Run lint
+        run: npm run lint
+
+      - name: Build app
+        run: npm run build
+
+      - name: Start built app and run smoke
+        env:
+          APP_MODE: test
+          NODE_ENV: test
+          CONTACTBRIDGE_DEMO_DATA_DIR: ./test/demo-data
+          CONTACTBRIDGE_DB_PATH: ${{ runner.temp }}/contactbridge-beta.sqlite
+          CONTACTBRIDGE_BASE_URL: http://127.0.0.1:3000
+          PORT: 3000
+        run: |
+          set -euo pipefail
+          node dist/server.cjs > "$RUNNER_TEMP/contactbridge-beta-server.log" 2>&1 &
+          server_pid=$!
+          cleanup() {
+            if ps -p "$server_pid" > /dev/null 2>&1; then
+              kill "$server_pid"
+              wait "$server_pid" || true
+            fi
+          }
+          trap cleanup EXIT
+
+          for attempt in $(seq 1 60); do
+            if curl -fsS "$CONTACTBRIDGE_BASE_URL/api/health" > /dev/null; then
+              break
+            fi
+            sleep 1
+            if [ "$attempt" -eq 60 ]; then
+              cat "$RUNNER_TEMP/contactbridge-beta-server.log"
+              exit 1
+            fi
+          done
+
+          npm run smoke

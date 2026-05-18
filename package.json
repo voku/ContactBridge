@@ -2,7 +2,7 @@
   "name": "contactbridge",
   "private": true,
   "version": "1.0.0",
-  "description": "Privacy-first social contact hub for reviewing, merging, and exporting connections from multiple sources.",
+  "description": "Local-first beta contact hub for importing, reviewing, approving, and exporting contacts from supported sources.",
   "type": "module",
   "engines": {
     "node": ">=22"
@@ -62,5 +62,15 @@
     "tsx": "^4.21.0",
     "typescript": "~5.8.2",
     "vite": "^6.2.3"
-  }
+  },
+  "keywords": [
+    "contactbridge",
+    "local-first",
+    "contacts",
+    "privacy",
+    "review-queue",
+    "browser-extension",
+    "sqlite",
+    "beta"
+  ]
 }

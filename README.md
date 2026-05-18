@@ -1,99 +1,119 @@
 # ContactBridge
 
-ContactBridge is a privacy-first social contact hub for local-first beta use. It imports profiles from supported sources, groups them into reviewable candidates, supports manual profile capture from LinkedIn, X, Bluesky, and XING, and exports approved contacts as CSV, JSON, or vCard files.
+> **Status: Local-first beta**
+>
+> ContactBridge is a local-first contact review hub for people who want to import contacts from supported sources, manually capture public profiles with an optional browser extension, review candidate matches, and export only the contacts they approve.
+>
+> **Hosted multi-user warning:** hosted mode exists for productization work only. Do **not** expose it to real users yet.
 
-## Features
+## What ContactBridge is
 
-- Import contacts from Bluesky, GitHub, Google Contacts, Mastodon, and X
-- Capture public profiles manually from LinkedIn, X, Bluesky, and XING with the browser extension
-- Optional LinkedIn API sync only for approved partner-access deployments
-- Review and merge candidate identities before approving them
-- Export approved contacts in CSV, JSON, and VCF formats
-- Optional browser extension for manual profile capture
-- Separate frontend and backend deployment support
+ContactBridge helps a single operator collect social/contact data from supported sources into one local review queue. It keeps imports reviewable, keeps export decisions explicit, and keeps the beta focused on local workflows instead of SaaS hosting.
 
-## Architecture
+## Who it is for
+
+- Individual users testing a local-first contact hub
+- Developers evaluating provider integrations and export flows
+- Beta testers validating manual extension capture and review workflows
+- Contributors working on a privacy-conscious single-operator product
+
+## What it does today
+
+- Imports contacts from Bluesky, GitHub, Google Contacts, Mastodon, and X
+- Supports manual public-profile capture from LinkedIn, X, Bluesky, and XING with the browser extension
+- Keeps imported identities in a review queue until you approve them
+- Exports approved contacts as CSV, JSON, or VCF
+- Supports local backup, restore, and full local reset in `APP_MODE=local` or `APP_MODE=test`
+- Supports safe demo flows with bundled fixture data via `npm run demo`
+- Provides smoke verification with `npm run smoke`
+
+## Known limitations
+
+- Local-first single-operator beta only
+- No hosted accounts
+- No multi-user isolation
+- No SaaS deployment support
+- Hosted mode is **not** ready for real users
+- No background scraping or silent capture
+- Production extension hub origins must be explicitly packaged before distribution
+
+## Quickstart (local-first beta)
+
+```bash
+git clone https://github.com/voku/ContactBridge.git
+cd ContactBridge
+npm ci
+cp .env.example .env.local
+npm run demo
+```
+
+Then open <http://localhost:3000> and:
+
+1. Confirm the **Dashboard** first-run checklist is green enough to continue.
+2. Open **Sources** and connect one demo-backed source.
+3. Review and approve at least one candidate in **Review Queue**.
+4. Download CSV, JSON, or VCF from **Export Data**.
+5. Run `npm run smoke` in a second terminal.
+
+### Local beta defaults
+
+Keep `.env.local` aligned with the beta flow:
+
+- `APP_MODE=local`
+- `APP_URL=http://localhost:3000` when testing OAuth callbacks locally
+- `CONTACTBRIDGE_DEMO_DATA_DIR=./test/demo-data` for demo fixtures
+- Leave `VITE_API_BASE_URL` unset for same-origin local usage
+- Ignore `CONTACTBRIDGE_SECRET_KEY` unless you are explicitly testing hosted mode
+
+## Product tour
+
+Lightweight placeholders live in [`docs/assets/`](docs/assets/README.md) until final screenshots are captured.
+
+| View | Preview |
+| --- | --- |
+| Dashboard / first-run checklist | ![Dashboard placeholder](docs/assets/dashboard-first-run-placeholder.svg) |
+| Sources | ![Sources placeholder](docs/assets/sources-placeholder.svg) |
+| Review queue | ![Review queue placeholder](docs/assets/review-queue-placeholder.svg) |
+| Export page | ![Export page placeholder](docs/assets/export-page-placeholder.svg) |
+| Extension setup | ![Extension setup placeholder](docs/assets/extension-setup-placeholder.svg) |
+
+## Demo and verification
+
+- Full walkthrough: [`docs/DEMO_WALKTHROUGH.md`](docs/DEMO_WALKTHROUGH.md)
+- Beta release checklist: [`docs/BETA_RELEASE_CHECKLIST.md`](docs/BETA_RELEASE_CHECKLIST.md)
+- Release notes: [`docs/RELEASE_NOTES_BETA.md`](docs/RELEASE_NOTES_BETA.md)
+- Local-first beta boundaries: [`docs/LOCAL_FIRST_BETA.md`](docs/LOCAL_FIRST_BETA.md)
+- Extension packaging: [`docs/EXTENSION_PACKAGING.md`](docs/EXTENSION_PACKAGING.md)
+
+Run the main verification commands before opening a PR:
+
+```bash
+npm run test:integration
+npm run lint
+npm run build
+npm run smoke
+```
+
+## Architecture overview
+
+```mermaid
+flowchart LR
+    Sources[Supported APIs / Manual Capture] --> Server[Express + SQLite backend]
+    Extension[Optional Chrome extension] --> Server
+    Server --> Review[Review Queue]
+    Review --> Approved[Approved Contacts]
+    Approved --> Exports[CSV / JSON / VCF exports]
+    Server --> Backup[Local backup / restore]
+    UI[React + Vite frontend] --> Server
+```
+
+### Repository structure
 
 - `src/`: React + Vite frontend
-- `server.ts`: Express API, OAuth callbacks, and SQLite-backed sync logic
+- `server.ts`: Express API, local runtime boundaries, sync logic, export routes, and backup/restore routes
 - `src/lib/db/schema.ts`: Drizzle schema for persisted data
-- `extension/`: Chrome extension for manual profile capture
-
-The local development server runs the Express backend and serves the Vite frontend from the same origin.
-
-## Requirements
-
-- Node.js 22+
-- npm
-
-## Local-first beta quickstart
-
-1. Install dependencies:
-
-   ```bash
-   npm install
-   ```
-
-2. Create a local environment file:
-
-   ```bash
-   cp .env.example .env.local
-   ```
-
-3. Edit `.env.local` for local-first beta use:
-
-   - `APP_MODE`: `local`, `test`, or `hosted`; defaults to `test` when `NODE_ENV=test`, `local` when `NODE_ENV=development`, and `hosted` otherwise
-   - `APP_URL`: use `http://localhost:3000` for local OAuth callback testing
-   - `CONTACTBRIDGE_CORS_ORIGINS`: only needed for hosted or split-origin setups
-   - `CONTACTBRIDGE_SECRET_KEY`: only required in hosted mode
-   - `VITE_API_BASE_URL`: leave unset for same-origin local use
-   - `CONTACTBRIDGE_DEMO_DATA_DIR`: keep `./test/demo-data` to enable safe demo fixture imports
-
-4. Start the app:
-
-   ```bash
-   npm run dev
-   ```
-
-5. Open `http://localhost:3000`.
-
-6. Open the dashboard and confirm:
-   - backend reachable
-   - database reachable
-   - export endpoints available
-   - extension health available
-   - current `APP_MODE`
-
-7. Run a demo walkthrough without real provider tokens:
-
-   ```bash
-   npm run demo
-   ```
-
-   Then connect one demo source from **Sources** and run a sync, or point `CONTACTBRIDGE_DEMO_DATA_DIR` at your own fixture directory before starting the app.
-
-8. Load the extension from `extension/`:
-   - open `chrome://extensions`
-   - enable **Developer mode**
-   - choose **Load unpacked**
-   - select `./extension`
-   - set the hub URL to `http://localhost:3000`
-
-9. Capture one profile with the extension or import one profile from a configured source.
-
-10. Open **Review Queue** and approve at least one candidate.
-
-11. Open **Exports** and download CSV, JSON, or VCF. Only approved candidates are exported.
-
-12. Run the local smoke check while the app is running:
-
-   ```bash
-   npm run smoke
-   ```
-
-## Local development
-
-The quickstart above is the recommended local-first beta workflow. Use the sections below when you need deployment, extension, export, or verification details.
+- `extension/`: Chrome extension for manual capture
+- `docs/`: beta release, demo, and packaging documentation
 
 ## Scripts
 
@@ -104,82 +124,22 @@ The quickstart above is the recommended local-first beta workflow. Use the secti
 - `npm run build:client`: build the static frontend only
 - `npm run build`: build the frontend and bundle the Node server
 - `npm run start`: run the production server bundle
-- `npm run smoke`: verify `/api/health`, `/api/extension/health`, and export endpoints against `http://127.0.0.1:3000` (or `CONTACTBRIDGE_BASE_URL`)
+- `npm run smoke`: verify `/api/health`, `/api/status`, `/api/extension/health`, export endpoints, and local backup availability against `http://127.0.0.1:3000` (or `CONTACTBRIDGE_BASE_URL`)
 
-## Production deployment
+## Keywords
 
-### Full application deployment
-
-Use `npm run build` when you want the Express API and frontend deployed together on a Node-compatible host. ContactBridge is still single-user/local-first software: do not expose hosted mode to real users until authentication, authorization, CSRF protection, and per-user data ownership are implemented.
-
-Required environment variables:
-
-- `APP_MODE=hosted`: disables local-only destructive routes
-- `APP_URL`: absolute backend origin, for example `https://api.example.com`
-- `CONTACTBRIDGE_CORS_ORIGINS`: comma-separated list of trusted frontend origins
-- `CONTACTBRIDGE_SECRET_KEY`: high-entropy secret used to encrypt stored provider tokens
-- `VITE_API_BASE_URL`: optional absolute API origin for separately hosted frontends
-
-### Step-by-step live switch guide
-
-Use this checklist when you are ready to move ContactBridge from local or staging usage to the live environment.
-
-1. Pick your production shape:
-   - **Single host:** deploy the Express API and frontend together with `npm run build`
-   - **Split host:** deploy the backend separately and publish the frontend with `npm run build:client` or GitHub Pages
-2. Provision a public backend URL, set `APP_MODE=hosted`, and set `APP_URL` to that exact origin.
-3. Choose a persistent SQLite file location and set `CONTACTBRIDGE_DB_PATH` if you do not want to use the default `sqlite.db` in the app directory.
-4. Set `CONTACTBRIDGE_SECRET_KEY` and configure `CONTACTBRIDGE_CORS_ORIGINS` for the trusted frontend origin.
-5. If the frontend will live on a different origin, set `VITE_API_BASE_URL` to the public backend URL before building the frontend.
-6. Install dependencies and verify the release locally:
-
-   ```bash
-   npm install
-   npm run test:integration
-   npm run lint
-   npm run build
-   ```
-
-7. If you already have production data, copy the current SQLite database to the new `CONTACTBRIDGE_DB_PATH` location before starting the new server.
-8. Deploy the backend, start it with `npm run start`, and confirm `GET /api/health` returns `{"status":"ok","appMode":"hosted"}`.
-9. Update OAuth callback settings so every provider points to the live backend:
-   - `https://YOUR_APP_URL/auth/google/callback`
-   - `https://YOUR_APP_URL/auth/x/callback`
-10. If you are using a separately hosted frontend, build and publish that frontend only after `VITE_API_BASE_URL` is set for the live backend.
-11. Switch traffic to the live deployment by updating DNS, your reverse proxy, or your public frontend URL.
-12. Run a smoke test in production:
-    - open the dashboard
-    - add or reconnect a source
-    - run a sync
-    - review candidates
-    - export contacts
-13. Keep the previous deployment and database backup until the live instance has been stable long enough for you to roll back safely if needed.
-
-Hosted mode fails closed at startup:
-
-- Invalid `APP_MODE` values stop startup
-- `CONTACTBRIDGE_SECRET_KEY` is required before startup completes
-- CORS requires an explicit origin allowlist and rejects no-origin requests
-
-### GitHub Pages frontend deployment
-
-This repository includes a GitHub Actions workflow that deploys the Vite frontend to GitHub Pages on pushes to `main`.
-
-Important:
-
-- GitHub Pages hosts the frontend only
-- The API, OAuth callbacks, and SQLite database still require a separate backend deployment
-- Set `VITE_API_BASE_URL` in your frontend environment if the backend lives on another origin
-
-The workflow uses:
-
-- `VITE_BASE_PATH=/ContactBridge/`
-
-If you fork this repository, update `.github/workflows/deploy-pages.yml` and the canonical social URLs in `index.html`.
+local-first, privacy-conscious, contact review, manual capture, export workflow, browser extension, SQLite
 
 ## Browser extension
 
-The Chrome extension lives in `extension/` and supports manual capture from LinkedIn, X, Bluesky, and XING. By default it only sends captured profile data to local hubs such as `http://localhost:3000`; production hub origins must be explicitly packaged into the extension before distribution. Before saving a hub URL, the extension validates `${hub}/api/extension/health` to confirm the target is a compatible ContactBridge hub.
+The Chrome extension lives in `extension/` and supports manual capture from LinkedIn, X, Bluesky, and XING.
+
+- Load it unpacked for local beta use
+- The side panel validates `${hub}/api/extension/health` before saving a hub URL
+- Optional host permissions mean access is only granted to the sites you explicitly enable
+- Packaged production builds must explicitly include any non-local hub origins before distribution
+
+See [`docs/EXTENSION_PACKAGING.md`](docs/EXTENSION_PACKAGING.md) for packaging and safety guidance.
 
 ## Export API endpoints
 
@@ -191,56 +151,39 @@ Frontend export buttons download server-generated files from:
 
 Only approved candidates are exported.
 
-To load it locally:
-
-1. Open `chrome://extensions`
-2. Enable **Developer mode**
-3. Choose **Load unpacked**
-4. Select `extension/`
-5. Set the hub URL to `http://localhost:3000`
-6. Production extension builds must explicitly package any non-local hub origins before distribution
-
-## Demo mode
-
-ContactBridge can run safely with local demo fixtures so you can test imports without real provider tokens.
-
-1. Keep `CONTACTBRIDGE_DEMO_DATA_DIR="./test/demo-data"` in `.env.local`, or run:
-
-   ```bash
-   npm run demo
-   ```
-
-2. Start the app and connect a supported source from **Sources**.
-3. Run the sync flow. ContactBridge will load local JSON fixtures instead of live provider data when a matching fixture file exists.
-4. Review, approve, and export the demo contacts just like a real local session.
-
-`CONTACTBRIDGE_DEMO_DATA_DIR` is exposed in runtime status only as an enabled/disabled flag; the app does not leak fixture filesystem paths.
-
 ## Local backup and restore
 
-- `GET /api/database/backup`: download a local/test JSON backup of the SQLite-backed data
-- `POST /api/database/restore`: restore a local/test backup with `x-contactbridge-confirm-restore: restore-local-data`
-- Hosted mode blocks both restore and other local-only destructive flows
+Local and test modes expose:
 
-## Key Files Detector helper prompt
+- `GET /api/database/backup`
+- `POST /api/database/restore` with `x-contactbridge-confirm-restore: restore-local-data`
+- `DELETE /api/database` with `x-contactbridge-confirm-reset: erase-local-data`
 
-Use this prompt when you want an assistant to identify the most relevant files before making changes:
+Hosted mode keeps backup/restore/reset blocked.
 
-```text
-You are reviewing the ContactBridge repository. Identify the key files for this task, grouped by frontend, backend, data model, deployment, and documentation. For each file, explain in one sentence why it matters and which change risks it affects.
-```
+## Hosted mode boundary
 
-## Verification
+ContactBridge is not hosted multi-user ready yet. Before any public hosted rollout, it still needs authentication, authorization, per-user isolation, and additional browser/server security hardening.
 
-Before opening a pull request, run:
+Hosted mode fails closed at startup:
 
-```bash
-npm run test:integration
-npm run lint
-npm run build
-npm run smoke
-```
+- Invalid `APP_MODE` values stop startup
+- `CONTACTBRIDGE_SECRET_KEY` is required before startup completes
+- CORS requires an explicit origin allowlist and rejects no-origin requests
 
-## Local-first beta boundaries
+## GitHub Pages frontend deployment
 
-See `docs/LOCAL_FIRST_BETA.md` for what is currently safe in local usage, what is not yet safe for hosted multi-user usage, and what remains before public hosted rollout.
+This repository includes a GitHub Actions workflow that deploys the Vite frontend to GitHub Pages on pushes to `main`.
+
+Important:
+
+- GitHub Pages hosts the frontend only
+- The API, OAuth callbacks, and SQLite database still require a separate backend deployment
+- Set `VITE_API_BASE_URL` in your frontend environment if the backend lives on another origin
+- Do not treat GitHub Pages deployment as hosted SaaS readiness
+
+The workflow uses:
+
+- `VITE_BASE_PATH=/ContactBridge/`
+
+If you fork this repository, update `.github/workflows/deploy-pages.yml` and the canonical social URLs in `index.html`.

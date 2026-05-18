@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1280" height="720" viewBox="0 0 1280 720" role="img" aria-labelledby="title desc">
+  <title id="title">Review queue screenshot placeholder</title>
+  <desc id="desc">Placeholder for the ContactBridge review queue screenshot.</desc>
+  <rect width="1280" height="720" fill="#f8fafc"/>
+  <rect x="60" y="60" width="1160" height="600" rx="24" fill="#ffffff" stroke="#cbd5e1" stroke-width="2"/>
+  <text x="100" y="150" font-family="Arial, sans-serif" font-size="40" fill="#0f172a">Review queue</text>
+  <text x="100" y="210" font-family="Arial, sans-serif" font-size="24" fill="#475569">Replace this placeholder after capturing pending candidates waiting for approval.</text>
+</svg>

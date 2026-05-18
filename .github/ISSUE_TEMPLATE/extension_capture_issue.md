@@ -8,10 +8,31 @@ assignees: ''
 
 ## Summary
 
-## Site you tried to capture from
+## Site or source you tried to capture from
 
 ## Hub URL used
 
-## What happened in the extension
+## Reproduction steps
 
-## Console or screenshot notes
+1.
+2.
+3.
+
+## Expected result
+
+## Actual result
+
+## Console notes, screenshots, or smoke output
+
+```text
+Paste relevant extension console output, screenshots description, or npm run smoke output here.
+```
+
+## Environment
+
+- APP_MODE:
+- Node version:
+- Operating system:
+- Browser:
+- Extension version / manually loaded unpacked?:
+- Source/provider involved:
