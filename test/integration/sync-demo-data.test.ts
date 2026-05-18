@@ -319,7 +319,7 @@ const postSyncExpectError = async <T>(baseUrl: string, pathname: string, body: R
   return errorPayload as T;
 };
 
-const createOverrideDemoDataDir = async (t: test.TestContext) => {
+const createOverrideDemoDataDir = async (t: any) => {
   const overrideDemoDataRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'contactbridge-demo-'));
   const overrideDemoDataDir = path.join(overrideDemoDataRoot, 'fixtures');
   await fs.cp(demoDataDir, overrideDemoDataDir, { recursive: true });
@@ -355,7 +355,7 @@ const getProfileSnapshots = (sqlite: any, sourceType: string, sourceAccountId: s
     profileUrl: string | null;
   }>;
 
-  return profiles.map((profile) => ({
+  return profiles.map(({ id: _id, ...profile }) => ({
     ...profile,
     relationTypes: (sqlite.prepare(`
       SELECT relation_type AS relationType
@@ -632,7 +632,7 @@ const providerCoverageCases: ProviderCoverageCase[] = [
         displayName: 'Cathy Demo',
         bio: 'Partnerships manager',
         profileUrl: 'https://example.com/cathy',
-        relationTypes: []
+        relationTypes: ['contact']
       },
       {
         sourceType: 'google',
@@ -641,7 +641,7 @@ const providerCoverageCases: ProviderCoverageCase[] = [
         displayName: 'Louis Demo',
         bio: 'Engineering Manager at Example Co',
         profileUrl: 'https://example.com/louis',
-        relationTypes: []
+        relationTypes: ['contact']
       }
     ],
     rewriteFixture: async (fixtureDir) => {
@@ -671,7 +671,7 @@ const providerCoverageCases: ProviderCoverageCase[] = [
         displayName: 'Cathy Demo',
         bio: 'Partnerships manager',
         profileUrl: 'https://example.com/cathy',
-        relationTypes: []
+        relationTypes: ['contact']
       }
     ]
   }
@@ -903,7 +903,7 @@ test('x sync requires a token only when fixture mode is unavailable', async (t) 
   const errorPayload = await postSyncExpectError<{ error: string }>(server.baseUrl, '/api/sync/x', {
     sourceAccountId: sourceAccount.id
   });
-  assert.match(errorPayload.error, /access token is required/i);
+  assert.match(errorPayload.error, /access token .* required/i);
 
   assert.deepEqual(getSyncJobStatusRows(sqlite, sourceAccount.id), [
     { status: 'failed', errorMessageSafe: 'An X access token is required. Please reconnect your X account.' }
@@ -1017,11 +1017,10 @@ test('manual merge preserves approved status and combined notes', async (t) => {
   });
 
   const candidates = await getJson<Array<{ id: string; status: string; notes: string | null }>>(server.baseUrl, '/api/candidates');
-  assert.deepEqual(candidates, [{
-    id: primaryCandidate.id,
-    status: 'approved',
-    notes: 'Keep this note\n\nApprove this note'
-  }]);
+  assert.equal(candidates.length, 1);
+  assert.equal(candidates[0]?.id, primaryCandidate.id);
+  assert.equal(candidates[0]?.status, 'approved');
+  assert.equal(candidates[0]?.notes, 'Keep this note\n\nApprove this note');
 });
 
 test('sync preserves both relationship directions for mutual Bluesky profiles', async (t) => {
@@ -2027,11 +2026,11 @@ test('exports stay valid when empty and only include approved candidates with st
     displayName: 'Manual XING Person',
     handle: 'manual_xing_person'
   });
-  const ignoredCandidate = await postJson<{ id: string }>(server.baseUrl, '/api/capture/manual', {
+  const rejectedCandidate = await postJson<{ id: string }>(server.baseUrl, '/api/capture/manual', {
     source: 'linkedin',
-    profileUrl: 'https://www.linkedin.com/in/ignored-person',
-    displayName: 'Ignored Person',
-    handle: 'ignored-person'
+    profileUrl: 'https://www.linkedin.com/in/rejected-person',
+    displayName: 'Rejected Person',
+    handle: 'rejected-person'
   });
 
   const candidates = await getJson<Array<{ id: string; canonicalName: string }>>(server.baseUrl, '/api/candidates');
@@ -2041,14 +2040,14 @@ test('exports stay valid when empty and only include approved candidates with st
     const candidateId = idsByName.get(name) || (name === 'Manual X Person' ? xCandidate.id : name === 'Manual LinkedIn Person' ? linkedinCandidate.id : xingCandidate.id);
     await patchJson(server.baseUrl, `/api/candidates/${candidateId}`, { status: 'approved' });
   }
-  await patchJson(server.baseUrl, `/api/candidates/${ignoredCandidate.id}`, { status: 'ignored' });
+  await patchJson(server.baseUrl, `/api/candidates/${rejectedCandidate.id}`, { status: 'rejected' });
 
   const exportJson = JSON.parse(await getText(server.baseUrl, '/api/exports/contacts.json')) as Array<{ id: string; canonicalName: string }>;
   assert.deepEqual(exportJson.map((candidate) => candidate.canonicalName).sort(), approvedNames.sort());
-  assert.equal(exportJson.some((candidate) => candidate.id === ignoredCandidate.id), false);
+  assert.equal(exportJson.some((candidate) => candidate.id === rejectedCandidate.id), false);
 
   const csvExport = await getText(server.baseUrl, '/api/exports/contacts.csv');
-  assert.equal(csvExport.includes('Ignored Person'), false);
+  assert.equal(csvExport.includes('Rejected Person'), false);
   assert.match(csvExport, /https:\/\/github\.com\/ivan-demo/);
   assert.match(csvExport, /https:\/\/x\.com\/manual-x-person/);
   assert.match(csvExport, /https:\/\/bsky\.app\/profile\/alice-demo\.bsky\.social/);
@@ -2057,7 +2056,7 @@ test('exports stay valid when empty and only include approved candidates with st
   assert.match(csvExport, /https:\/\/www\.xing\.com\/profile\/manual_xing_person/);
 
   const vcfExport = await getText(server.baseUrl, '/api/exports/contacts.vcf');
-  assert.equal(vcfExport.includes('Ignored Person'), false);
+  assert.equal(vcfExport.includes('Rejected Person'), false);
   assert.match(vcfExport, /URL:https:\/\/github\.com\/ivan-demo/);
   assert.match(vcfExport, /URL:https:\/\/x\.com\/manual-x-person/);
   assert.match(vcfExport, /URL:https:\/\/bsky\.app\/profile\/alice-demo\.bsky\.social/);

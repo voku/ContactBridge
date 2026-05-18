@@ -51,9 +51,12 @@ const createDocument = (selectors: Record<string, string>, title = '') => ({
 test('getProfileContext only treats real profile URLs as capturable', () => {
   assert.equal(extensionApi.getProfileContext('https://www.linkedin.com/in/jane-demo').source, 'linkedin');
   assert.equal(extensionApi.getProfileContext('https://x.com/jane_demo').source, 'x');
+  assert.equal(extensionApi.getProfileContext('https://twitter.com/jane_demo').source, 'x');
   assert.equal(extensionApi.getProfileContext('https://x.com/home').isSupported, false);
   assert.equal(extensionApi.getProfileContext('https://x.com/explore').isSupported, false);
   assert.equal(extensionApi.getProfileContext('https://x.com/messages').isSupported, false);
+  assert.equal(extensionApi.getProfileContext('https://x.com/search').isSupported, false);
+  assert.equal(extensionApi.getProfileContext('https://x.com/settings').isSupported, false);
   assert.equal(extensionApi.getProfileContext('https://bsky.app/profile/jane.test').source, 'bluesky');
   assert.equal(extensionApi.getProfileContext('https://www.xing.com/profile/Jane_Demo').source, 'xing');
   assert.equal(extensionApi.getProfileContext('not-a-url').isSupported, false);
@@ -103,10 +106,19 @@ test('isAllowedHubUrl enforces local-only default and allows explicitly packaged
     ok: true,
     url: 'http://localhost:3000'
   });
+  assert.deepEqual(extensionApi.isAllowedHubUrl('http://127.0.0.1:3000'), {
+    error: '',
+    ok: true,
+    url: 'http://127.0.0.1:3000'
+  });
 
   const rejectedUnknownHub = extensionApi.isAllowedHubUrl('https://unknown.example.test');
   assert.equal(rejectedUnknownHub.ok, false);
   assert.match(rejectedUnknownHub.error, /only sends captures to local ContactBridge hubs/i);
+
+  const invalidHub = extensionApi.isAllowedHubUrl('not-a-valid-url');
+  assert.equal(invalidHub.ok, false);
+  assert.match(invalidHub.error, /valid absolute url/i);
 
   const allowedPackagedHub = extensionApi.isAllowedHubUrl('https://hub.example.test', {
     productionHubOrigins: new Set(['https://hub.example.test'])
@@ -199,6 +211,19 @@ test('handleBackgroundMessage routes capture requests through script injection',
   ]);
   assert.equal(response.ok, true);
   assert.equal(response.profile.handle, 'jane-demo');
+});
+
+test('extractProfileFromDocument returns unknown for unsupported pages', () => {
+  assert.deepEqual(
+    extensionApi.extractProfileFromDocument(createDocument({ h1: 'Ignore me' }), 'https://example.com/not-supported'),
+    {
+      displayName: '',
+      handle: '',
+      headline: '',
+      profileUrl: 'https://example.com/not-supported',
+      source: 'unknown'
+    }
+  );
 });
 
 test('handleBackgroundMessage returns injection errors to the side panel', async () => {

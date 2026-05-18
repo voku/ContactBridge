@@ -384,8 +384,8 @@ const getSafeSyncErrorMessage = (error: unknown, fallback = 'Unknown error occur
     : (error === null || error === undefined ? '' : String(error));
   const sanitizedMessage = rawMessage
     .replace(/Bearer\s+[A-Za-z0-9._~+/=-]+/gi, 'Bearer [redacted]')
-    .replace(/(access[_ -]?token["'=:\s]+)([^,\s]+)/gi, '$1[redacted]')
-    .replace(/(refresh[_ -]?token["'=:\s]+)([^,\s]+)/gi, '$1[redacted]');
+    .replace(/((?:access|refresh)[_ -]?token\s*[=:]\s*)([^,\s]+)/gi, '$1[redacted]')
+    .replace(/((?:"(?:accessToken|refreshToken)"\s*:\s*")([^"]+))"/g, '$1[redacted]"');
 
   return trimMaybeString(sanitizedMessage) || fallback;
 };
