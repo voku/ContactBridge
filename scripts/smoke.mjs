@@ -89,7 +89,7 @@ const checks = [
       expectHeaderIncludes(response, 'content-type', 'text/csv');
       const body = await response.text();
       if (!body.startsWith('Name,Source,Handle,Profile URL,Notes')) {
-        throw new Error('CSV export did not include the expected header row for an empty-or-approved export response.');
+        throw new Error('CSV export did not include the expected header row.');
       }
     }
   },

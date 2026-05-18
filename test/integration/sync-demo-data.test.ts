@@ -4,7 +4,7 @@ import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
-import test from 'node:test';
+import test, { type TestContext } from 'node:test';
 import { fileURLToPath } from 'node:url';
 import Database from 'better-sqlite3';
 
@@ -42,6 +42,7 @@ const syncCases: SyncCase[] = [
     sourceType: 'x',
     endpoint: '/api/sync/x',
     payload: { accessToken: 'demo-token' },
+    // frank_demo intentionally exercises the X displayName fallback to username when name is empty.
     expectedNames: ['Eve Demo', 'Shared Demo', 'frank_demo']
   },
   {
@@ -319,7 +320,7 @@ const postSyncExpectError = async <T>(baseUrl: string, pathname: string, body: R
   return errorPayload as T;
 };
 
-const createOverrideDemoDataDir = async (t: any) => {
+const createOverrideDemoDataDir = async (t: TestContext) => {
   const overrideDemoDataRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'contactbridge-demo-'));
   const overrideDemoDataDir = path.join(overrideDemoDataRoot, 'fixtures');
   await fs.cp(demoDataDir, overrideDemoDataDir, { recursive: true });
@@ -339,7 +340,7 @@ type ProfileSnapshot = {
   relationTypes: string[];
 };
 
-const getProfileSnapshots = (sqlite: any, sourceType: string, sourceAccountId: string): ProfileSnapshot[] => {
+const getProfileSnapshots = (sqlite: InstanceType<typeof Database>, sourceType: string, sourceAccountId: string): ProfileSnapshot[] => {
   const profiles = sqlite.prepare(`
     SELECT id, source_type AS sourceType, source_profile_id AS sourceProfileId, handle, display_name AS displayName, bio, profile_url AS profileUrl
     FROM social_profiles
@@ -371,7 +372,7 @@ const getProfileSnapshots = (sqlite: any, sourceType: string, sourceAccountId: s
   }));
 };
 
-const getCandidateProfileLinkStats = (sqlite: any) => (
+const getCandidateProfileLinkStats = (sqlite: InstanceType<typeof Database>) => (
   sqlite.prepare(`
     SELECT
       COUNT(*) AS totalCount,
@@ -380,7 +381,7 @@ const getCandidateProfileLinkStats = (sqlite: any) => (
   `).get() as { totalCount: number; distinctCount: number }
 );
 
-const getSyncJobStatusRows = (sqlite: any, sourceAccountId: string) => (
+const getSyncJobStatusRows = (sqlite: InstanceType<typeof Database>, sourceAccountId: string) => (
   sqlite.prepare(`
     SELECT status, error_message_safe AS errorMessageSafe
     FROM sync_jobs

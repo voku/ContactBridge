@@ -378,6 +378,9 @@ ensureStartupModeRequirements();
 
 
 const trimMaybeString = (value: unknown) => typeof value === 'string' ? value.trim() : '';
+/**
+ * Redacts common credential-bearing substrings before surfacing sync errors to clients or sync_jobs.
+ */
 const getSafeSyncErrorMessage = (error: unknown, fallback = 'Unknown error occurred during sync') => {
   const rawMessage = error instanceof Error
     ? error.message
@@ -385,7 +388,7 @@ const getSafeSyncErrorMessage = (error: unknown, fallback = 'Unknown error occur
   const sanitizedMessage = rawMessage
     .replace(/Bearer\s+[A-Za-z0-9._~+/=-]+/gi, 'Bearer [redacted]')
     .replace(/((?:access|refresh)[_ -]?token\s*[=:]\s*)([^,\s]+)/gi, '$1[redacted]')
-    .replace(/((?:"(?:accessToken|refreshToken)"\s*:\s*")([^"]+))"/g, '$1[redacted]"');
+    .replace(/("(?:accessToken|refreshToken)"\s*:\s*")([^"]+)"/g, '$1[redacted]"');
 
   return trimMaybeString(sanitizedMessage) || fallback;
 };
