@@ -231,11 +231,16 @@ const normalizeMastodonInstanceUrl = (instance: string) => {
 const MANUAL_CAPTURE_SOURCES = new Set(['bluesky', 'linkedin', 'x', 'xing']);
 const OAUTH_STATE_TTL_MS = 10 * 60 * 1000;
 const VALID_APP_MODES = new Set(['local', 'hosted', 'test']);
-const DEFAULT_APP_MODE = process.env.NODE_ENV === 'test'
-  ? 'test'
-  : process.env.NODE_ENV === 'development'
-    ? 'local'
-    : 'hosted';
+const getDefaultAppMode = () => {
+  if (process.env.NODE_ENV === 'test') {
+    return 'test';
+  }
+  if (process.env.NODE_ENV === 'development') {
+    return 'local';
+  }
+  return 'hosted';
+};
+const DEFAULT_APP_MODE = getDefaultAppMode();
 const requestedAppMode = (process.env.APP_MODE || DEFAULT_APP_MODE).toLowerCase();
 if (!VALID_APP_MODES.has(requestedAppMode)) {
   throw new Error(`Invalid APP_MODE "${requestedAppMode}". Expected one of: local, test, hosted.`);

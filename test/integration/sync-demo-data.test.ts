@@ -102,7 +102,7 @@ const waitForHealth = async (baseUrl: string, options: { origin?: string } = {})
   for (let attempt = 0; attempt < MAX_HEALTH_CHECK_ATTEMPTS; attempt++) {
     try {
       const response = await fetch(`${baseUrl}/api/health`, {
-        headers: options.origin ? { Origin: options.origin } : undefined
+        ...(options.origin ? { headers: { Origin: options.origin } } : {})
       });
       if (response.ok) {
         return;
@@ -252,7 +252,9 @@ const getText = async (
   pathname: string,
   options: { headers?: Record<string, string> } = {}
 ) => {
-  const response = await fetch(`${baseUrl}${pathname}`, { headers: options.headers });
+  const response = await fetch(`${baseUrl}${pathname}`, {
+    ...(options.headers ? { headers: options.headers } : {})
+  });
   assert.equal(response.ok, true, `Expected ${pathname} to succeed`);
   return response.text();
 };

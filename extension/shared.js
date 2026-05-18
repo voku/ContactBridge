@@ -95,7 +95,8 @@
       }
 
       return { error: '', ok: true, url: allowedHubUrl.url };
-    } catch {
+    } catch (error) {
+      console.error('Hub health check failed:', error);
       return {
         error: 'Hub validation failed. Could not reach the ContactBridge hub health endpoint.',
         ok: false,
