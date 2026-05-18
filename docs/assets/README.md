@@ -2,6 +2,8 @@
 
 The files in this directory are intentionally lightweight placeholder SVGs for the public beta release pass.
 
+See [`../SCREENSHOT_CAPTURE.md`](../SCREENSHOT_CAPTURE.md) for the release screenshot capture checklist and naming requirements.
+
 Expected real capture flow:
 
 1. Run `npm run demo`

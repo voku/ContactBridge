@@ -1,8 +1,8 @@
 {
   "name": "contactbridge",
   "private": true,
-  "version": "1.0.0",
-  "description": "Local-first beta contact hub for importing, reviewing, approving, and exporting contacts from supported sources.",
+  "version": "0.1.0-beta.1",
+  "description": "Local-first beta contact hub for supported imports, manual capture, review, and CSV/JSON/VCF exports.",
   "type": "module",
   "engines": {
     "node": ">=22"

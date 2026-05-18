@@ -1,4 +1,6 @@
-# ContactBridge Beta Release Notes
+# ContactBridge v0.1.0-beta.1 Release Notes
+
+> **Release label:** Local-first beta
 
 ## Release focus
 
@@ -8,7 +10,7 @@ ContactBridge is now available as a **local-first beta**. This release is intend
 
 - Local-first single-operator runtime with fail-closed `APP_MODE` handling
 - Source imports for Bluesky, GitHub, Google Contacts, Mastodon, and X
-- Restricted LinkedIn positioning: optional API sync only where approved access exists, plus manual extension capture
+- Restricted LinkedIn positioning: optional API sync only where approved partner access exists, plus manual extension capture
 - Manual profile capture for LinkedIn, X, Bluesky, and XING via the optional extension
 - Candidate review, approval, ignore, and merge flows before export
 - Backend-generated CSV, JSON, and VCF exports
@@ -23,7 +25,7 @@ ContactBridge is now available as a **local-first beta**. This release is intend
 - Google Contacts
 - Mastodon
 - X
-- LinkedIn (restricted positioning; do not market as unrestricted full-network scraping)
+- LinkedIn (manual capture plus partner-access-only API sync; do not market as unrestricted full-network scraping)
 - XING (manual capture via extension)
 
 ## Known limitations
