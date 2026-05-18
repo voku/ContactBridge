@@ -42,6 +42,20 @@ interface RuntimeStatus {
   hostedWarning: string | null;
 }
 
+interface ChartDatum {
+  name: string;
+  duration: number;
+  status: string;
+  startedAt: string;
+  errorMessage: string | null;
+  sourceType: string;
+}
+
+interface ChartTooltipProps {
+  active?: boolean;
+  payload?: Array<{ payload: ChartDatum }>;
+}
+
 const defaultStats: DashboardStats = {
   totalCandidates: 0,
   approvedContacts: 0,
@@ -134,7 +148,7 @@ export default function Dashboard() {
     };
   }, []);
 
-  const chartData = syncJobs.map((job) => {
+  const chartData: ChartDatum[] = syncJobs.map((job) => {
     const start = new Date(job.startedAt);
     const end = job.finishedAt ? new Date(job.finishedAt) : new Date();
     const duration = Math.max(1, differenceInSeconds(end, start));
@@ -160,9 +174,9 @@ export default function Dashboard() {
     { label: 'Extension configured (for manual capture)', done: extensionConfigured }
   ];
 
-  const CustomTooltip = ({ active, payload }: any) => {
-    if (active && payload && payload.length) {
-      const data = payload[0].payload;
+  const CustomTooltip = ({ active, payload }: ChartTooltipProps) => {
+    const data = payload?.[0]?.payload;
+    if (active && data) {
       return (
         <div className="bg-white p-3 border rounded shadow-sm text-sm">
           <p className="font-semibold">{data.name}</p>

@@ -76,7 +76,7 @@ The local development server runs the Express backend and serves the Vite fronte
    - open `chrome://extensions`
    - enable **Developer mode**
    - choose **Load unpacked**
-   - select `/home/runner/work/ContactBridge/ContactBridge/extension`
+   - select `./extension`
    - set the hub URL to `http://localhost:3000`
 
 9. Capture one profile with the extension or import one profile from a configured source.
