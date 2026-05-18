@@ -250,6 +250,10 @@ const isTestMode = APP_MODE === 'test';
 const isHostedMode = APP_MODE === 'hosted';
 const allowsLocalOnlyRoutes = !isHostedMode;
 const SECRET_ENCRYPTION_VERSION = 1;
+const LOCAL_EXTENSION_ORIGIN_PROTOCOLS = new Set([
+  'chrome-extension:',
+  'moz-extension:'
+]);
 const EXTENSION_HEALTH_CAPABILITIES = Object.freeze([
   'capture.manual.v1',
   'profiles.linkedin',
@@ -328,6 +332,15 @@ const isLoopbackOrigin = (origin: string) => {
     const url = new URL(origin);
     return (url.protocol === 'http:' || url.protocol === 'https:')
       && ['localhost', '127.0.0.1', '[::1]'].includes(url.hostname);
+  } catch {
+    return false;
+  }
+};
+
+const isLocalExtensionOrigin = (origin: string) => {
+  try {
+    const url = new URL(origin);
+    return LOCAL_EXTENSION_ORIGIN_PROTOCOLS.has(url.protocol) && Boolean(url.hostname);
   } catch {
     return false;
   }
@@ -1174,7 +1187,13 @@ async function startServer() {
 
   app.use(cors({
     origin: (origin, callback) => {
-      if ((!origin && allowsLocalOnlyRoutes) || (origin && (corsAllowedOrigins.has(origin) || (allowsLocalOnlyRoutes && isLoopbackOrigin(origin))))) {
+      if (
+        (!origin && allowsLocalOnlyRoutes)
+        || (origin && (
+          corsAllowedOrigins.has(origin)
+          || (allowsLocalOnlyRoutes && (isLoopbackOrigin(origin) || isLocalExtensionOrigin(origin)))
+        ))
+      ) {
         callback(null, true);
         return;
       }
