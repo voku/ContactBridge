@@ -119,7 +119,7 @@ const startServer = async (options: StartServerOptions = {}): Promise<ServerHand
   const port = await getFreePort();
   const baseUrl = `http://127.0.0.1:${port}`;
   const dbPath = path.join(tempDir, 'test.sqlite');
-  const env = {
+  const env: NodeJS.ProcessEnv = {
     ...process.env,
     CONTACTBRIDGE_DB_PATH: dbPath,
     CONTACTBRIDGE_DEMO_DATA_DIR: options.demoDataDir || demoDataDir,
@@ -166,7 +166,7 @@ const startServerExpectFailure = async (options: StartServerOptions = {}) => {
   const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), 'contactbridge-it-fail-'));
   const port = await getFreePort();
   const dbPath = path.join(tempDir, 'test.sqlite');
-  const env = {
+  const env: NodeJS.ProcessEnv = {
     ...process.env,
     CONTACTBRIDGE_DB_PATH: dbPath,
     CONTACTBRIDGE_DEMO_DATA_DIR: options.demoDataDir || demoDataDir,

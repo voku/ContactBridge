@@ -562,7 +562,8 @@ const getStoredSourceAccountAuth = (sourceAccountId: string) => {
   if (!encryptedAuthData && legacyAuthData) {
     try {
       storeSourceAccountAuth(sourceAccountId, legacyAuthData);
-    } catch {
+    } catch (error) {
+      console.warn('Failed to migrate legacy auth_data for source account:', sourceAccountId, error);
       // Keep fallback behavior if migration cannot be written in this request path.
     }
   }
@@ -823,12 +824,12 @@ const getProfileUrlForExport = (profile: typeof schema.socialProfiles.$inferSele
   }
 };
 
-const toCsvCell = (value: unknown) => {
+const escapeCsvCell = (value: unknown) => {
   const stringValue = value === null || value === undefined ? '' : String(value);
   return `"${stringValue.replace(/"/g, '""')}"`;
 };
 
-const toVCardText = (value: unknown) => {
+const escapeVCardText = (value: unknown) => {
   return String(value ?? '')
     .replace(/\\/g, '\\\\')
     .replace(/\r\n|\n|\r/g, '\\n')
@@ -1153,22 +1154,22 @@ async function startServer() {
       const candidateNotes = candidate.notes || '';
       if (candidate.profiles.length === 0) {
         rows.push([
-          toCsvCell(candidateName),
-          toCsvCell(''),
-          toCsvCell(''),
-          toCsvCell(''),
-          toCsvCell(candidateNotes)
+          escapeCsvCell(candidateName),
+          escapeCsvCell(''),
+          escapeCsvCell(''),
+          escapeCsvCell(''),
+          escapeCsvCell(candidateNotes)
         ].join(','));
         continue;
       }
 
       for (const profile of candidate.profiles) {
         rows.push([
-          toCsvCell(candidateName),
-          toCsvCell(profile.sourceType || ''),
-          toCsvCell(profile.handle || ''),
-          toCsvCell(getProfileUrlForExport(profile)),
-          toCsvCell(candidateNotes)
+          escapeCsvCell(candidateName),
+          escapeCsvCell(profile.sourceType || ''),
+          escapeCsvCell(profile.handle || ''),
+          escapeCsvCell(getProfileUrlForExport(profile)),
+          escapeCsvCell(candidateNotes)
         ].join(','));
       }
     }
@@ -1183,7 +1184,7 @@ async function startServer() {
     const cards: string[] = [];
 
     for (const candidate of approvedCandidates) {
-      const candidateName = toVCardText(candidate.canonicalName || 'Unknown');
+      const candidateName = escapeVCardText(candidate.canonicalName || 'Unknown');
       const lines = [
         'BEGIN:VCARD',
         'VERSION:3.0',
@@ -1192,13 +1193,13 @@ async function startServer() {
       ];
 
       if (candidate.notes) {
-        lines.push(`NOTE:${toVCardText(candidate.notes)}`);
+        lines.push(`NOTE:${escapeVCardText(candidate.notes)}`);
       }
 
       for (const profile of candidate.profiles) {
         const profileUrl = getProfileUrlForExport(profile);
         if (profileUrl) {
-          lines.push(`URL:${toVCardText(profileUrl)}`);
+          lines.push(`URL:${escapeVCardText(profileUrl)}`);
         }
       }
 
