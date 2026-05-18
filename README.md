@@ -81,7 +81,11 @@ Lightweight placeholders live in [`docs/assets/`](docs/assets/README.md) until f
 
 - Full walkthrough: [`docs/DEMO_WALKTHROUGH.md`](docs/DEMO_WALKTHROUGH.md)
 - Beta release checklist: [`docs/BETA_RELEASE_CHECKLIST.md`](docs/BETA_RELEASE_CHECKLIST.md)
+- Changelog: [`CHANGELOG.md`](CHANGELOG.md)
+- Release process: [`docs/RELEASE_PROCESS.md`](docs/RELEASE_PROCESS.md)
+- Manual QA checklist: [`docs/MANUAL_QA_BETA.md`](docs/MANUAL_QA_BETA.md)
 - Release notes: [`docs/RELEASE_NOTES_BETA.md`](docs/RELEASE_NOTES_BETA.md)
+- Screenshot capture guide: [`docs/SCREENSHOT_CAPTURE.md`](docs/SCREENSHOT_CAPTURE.md)
 - Local-first beta boundaries: [`docs/LOCAL_FIRST_BETA.md`](docs/LOCAL_FIRST_BETA.md)
 - Extension packaging: [`docs/EXTENSION_PACKAGING.md`](docs/EXTENSION_PACKAGING.md)
 

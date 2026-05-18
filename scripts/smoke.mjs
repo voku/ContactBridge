@@ -1,5 +1,28 @@
 const baseUrl = (process.env.CONTACTBRIDGE_BASE_URL || 'http://127.0.0.1:3000').replace(/\/+$/, '');
 
+const readResponseSnippet = async (response) => {
+  try {
+    const body = (await response.text()).trim();
+    if (!body) {
+      return '';
+    }
+
+    const snippet = body.replace(/\s+/g, ' ').slice(0, 240);
+    return `; body: ${snippet}`;
+  } catch {
+    return '';
+  }
+};
+
+const ensureOkResponse = async (response, label, url) => {
+  if (response.ok) {
+    return;
+  }
+
+  const snippet = await readResponseSnippet(response);
+  throw new Error(`Request failed for ${label} (${url}): HTTP ${response.status} ${response.statusText}${snippet}`);
+};
+
 const expectHeaderIncludes = (response, headerName, expectedValue) => {
   const value = response.headers.get(headerName);
   if (!value || !value.toLowerCase().includes(expectedValue.toLowerCase())) {
@@ -7,15 +30,23 @@ const expectHeaderIncludes = (response, headerName, expectedValue) => {
   }
 };
 
-const fetchJson = async (path) => {
-  const response = await fetch(`${baseUrl}${path}`);
-  if (!response.ok) {
-    throw new Error(`HTTP ${response.status} ${response.statusText}`);
-  }
+const fetchJson = async (path, label = path) => {
+  const url = `${baseUrl}${path}`;
+  const response = await fetch(url);
+  await ensureOkResponse(response, label, url);
   return response.json();
 };
 
-const runtimeStatus = await fetchJson('/api/status');
+let runtimeStatus;
+
+try {
+  runtimeStatus = await fetchJson('/api/status', 'runtime status');
+} catch (error) {
+  const message = error instanceof Error ? error.message : String(error);
+  console.error(`Smoke setup failed for ${baseUrl}`);
+  console.error(`  ${message}`);
+  process.exit(1);
+}
 
 const checks = [
   {
@@ -88,7 +119,7 @@ const checks = [
 
 if (runtimeStatus?.appMode === 'local' || runtimeStatus?.appMode === 'test') {
   checks.push({
-    label: 'database backup',
+    label: 'database backup (non-destructive)',
     path: '/api/database/backup',
     validate: async (response) => {
       expectHeaderIncludes(response, 'content-type', 'application/json');
@@ -103,15 +134,19 @@ if (runtimeStatus?.appMode === 'local' || runtimeStatus?.appMode === 'test') {
   });
 }
 
+console.log(`Smoke base URL: ${baseUrl}`);
+console.log('Smoke endpoints:');
+for (const check of checks) {
+  console.log(`- ${check.label}: ${check.path}`);
+}
+
 let failed = false;
 
 for (const check of checks) {
   const url = `${baseUrl}${check.path}`;
   try {
     const response = await fetch(url);
-    if (!response.ok) {
-      throw new Error(`HTTP ${response.status} ${response.statusText}`);
-    }
+    await ensureOkResponse(response, check.label, url);
 
     await check.validate(response);
     console.log(`✓ ${check.label}: ${url}`);
