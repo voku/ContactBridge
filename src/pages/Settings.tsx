@@ -32,7 +32,10 @@ export default function SettingsPage() {
     setIsErasing(true);
 
     try {
-      const res = await fetch(apiUrl('/api/database'), { method: 'DELETE' });
+      const res = await fetch(apiUrl('/api/database'), {
+        method: 'DELETE',
+        headers: { 'X-ContactBridge-Confirm-Reset': 'erase-local-data' }
+      });
       if (!res.ok) {
         const error = await res.json().catch(() => ({ error: 'Failed to erase database' }));
         throw new Error(error.error || 'Failed to erase database');

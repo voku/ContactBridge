@@ -11,20 +11,30 @@ document.addEventListener('DOMContentLoaded', () => {
 
   chrome.storage.sync.get(['apiUrl'], (result) => {
     if (result.apiUrl) {
-      apiUrlInput.value = result.apiUrl;
-      enableCapture();
+      const hubUrl = extensionApi.isAllowedHubUrl(result.apiUrl);
+      if (hubUrl.ok) {
+        apiUrlInput.value = hubUrl.url;
+        enableCapture();
+      } else {
+        chrome.storage.sync.remove(['apiUrl']);
+        showStatus(hubUrl.error, true);
+      }
     }
   });
 
   saveConfigBtn.addEventListener('click', () => {
-    const url = apiUrlInput.value.trim();
-    if (url) {
-      chrome.storage.sync.set({ apiUrl: url }, () => {
-        enableCapture();
-        showStatus('Configuration saved!', false);
-        setTimeout(() => { statusDiv.style.display = 'none'; }, 2000);
-      });
+    const hubUrl = extensionApi.isAllowedHubUrl(apiUrlInput.value);
+    if (!hubUrl.ok) {
+      showStatus(hubUrl.error, true);
+      return;
     }
+
+    chrome.storage.sync.set({ apiUrl: hubUrl.url }, () => {
+      apiUrlInput.value = hubUrl.url;
+      enableCapture();
+      showStatus('Configuration saved!', false);
+      setTimeout(() => { statusDiv.style.display = 'none'; }, 2000);
+    });
   });
 
   function enableCapture() {
@@ -111,11 +121,12 @@ document.addEventListener('DOMContentLoaded', () => {
     if (!currentProfile) return;
     
     chrome.storage.sync.get(['apiUrl'], (result) => {
-      const apiUrl = result.apiUrl;
-      if (!apiUrl) {
-        showStatus('Please set Hub URL first', true);
+      const hubUrl = extensionApi.isAllowedHubUrl(result.apiUrl);
+      if (!hubUrl.ok) {
+        showStatus(hubUrl.error, true);
         return;
       }
+      const apiUrl = hubUrl.url;
 
       const payload = {
         ...currentProfile,

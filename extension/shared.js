@@ -21,6 +21,42 @@
 
   const trimText = (value) => (typeof value === 'string' ? value.replace(/\s+/g, ' ').trim() : '');
 
+  // Add reviewed production hub origins here before packaging a hosted extension build.
+  // Values must be origins with protocol and host, for example: 'https://contactbridge.example.com'.
+  const ALLOWED_PRODUCTION_HUB_ORIGINS = new Set([]);
+
+  const isAllowedHubUrl = (url) => {
+    if (typeof url !== 'string' || !url.trim()) {
+      return { error: 'Enter a ContactBridge Hub URL.', ok: false, url: '' };
+    }
+
+    let parsedUrl;
+    try {
+      parsedUrl = new URL(url.trim());
+    } catch {
+      return { error: 'Hub URL must be a valid absolute URL.', ok: false, url: '' };
+    }
+
+    parsedUrl.search = '';
+    parsedUrl.hash = '';
+
+    const hostname = parsedUrl.hostname.toLowerCase();
+    const isLocalHub = parsedUrl.protocol === 'http:'
+      && (hostname === 'localhost' || hostname === '127.0.0.1' || hostname === '[::1]');
+    const isConfiguredProductionHub = parsedUrl.protocol === 'https:'
+      && ALLOWED_PRODUCTION_HUB_ORIGINS.has(parsedUrl.origin);
+
+    if (!isLocalHub && !isConfiguredProductionHub) {
+      return {
+        error: 'For safety, the extension only sends captures to local ContactBridge hubs unless a production origin is explicitly packaged.',
+        ok: false,
+        url: ''
+      };
+    }
+
+    return { error: '', ok: true, url: parsedUrl.origin };
+  };
+
   const getElementText = (doc, selector) => trimText(doc?.querySelector?.(selector)?.innerText || '');
 
   const getProfileContext = (url) => {
@@ -192,6 +228,7 @@
     CAPTURE_SCRIPT_FILES,
     extractProfileFromDocument,
     getProfileContext,
+    isAllowedHubUrl,
     handleBackgroundMessage,
     requestCapturedProfile
   };

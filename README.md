@@ -1,11 +1,12 @@
 # ContactBridge
 
-ContactBridge is a privacy-first social contact hub. It imports profiles from supported sources, groups them into reviewable candidates, supports manual profile capture from XING, and exports approved contacts as CSV, JSON, or vCard files.
+ContactBridge is a privacy-first social contact hub for local-first use. It imports profiles from supported sources, groups them into reviewable candidates, supports manual profile capture from LinkedIn, X, Bluesky, and XING, and exports approved contacts as CSV, JSON, or vCard files.
 
 ## Features
 
-- Import contacts from Bluesky, GitHub, Google Contacts, LinkedIn, Mastodon, and X
-- Capture public profiles manually from XING with the browser extension
+- Import contacts from Bluesky, GitHub, Google Contacts, Mastodon, and X
+- Capture public profiles manually from LinkedIn, X, Bluesky, and XING with the browser extension
+- Optional LinkedIn API sync only for approved partner-access deployments
 - Review and merge candidate identities before approving them
 - Export approved contacts in CSV, JSON, and VCF formats
 - Optional browser extension for manual profile capture
@@ -41,7 +42,10 @@ The local development server runs the Express backend and serves the Vite fronte
 
 3. Set the values you need:
 
+   - `APP_MODE`: `local`, `test`, or `hosted`; defaults to `local` outside tests
    - `APP_URL`: public backend URL used for OAuth callbacks
+   - `CONTACTBRIDGE_CORS_ORIGINS`: comma-separated frontend origins allowed to call the API when hosted
+   - `CONTACTBRIDGE_SECRET_KEY`: required in hosted mode to encrypt provider tokens
    - `VITE_API_BASE_URL`: optional frontend API origin when the UI is hosted separately
 
 4. Start the app:
@@ -65,11 +69,14 @@ The local development server runs the Express backend and serves the Vite fronte
 
 ### Full application deployment
 
-Use `npm run build` when you want the Express API and frontend deployed together on a Node-compatible host.
+Use `npm run build` when you want the Express API and frontend deployed together on a Node-compatible host. ContactBridge is still single-user/local-first software: do not expose hosted mode to real users until authentication, authorization, CSRF protection, and per-user data ownership are implemented.
 
 Required environment variables:
 
+- `APP_MODE=hosted`: disables local-only destructive routes
 - `APP_URL`: absolute backend origin, for example `https://api.example.com`
+- `CONTACTBRIDGE_CORS_ORIGINS`: comma-separated list of trusted frontend origins
+- `CONTACTBRIDGE_SECRET_KEY`: high-entropy secret used to encrypt stored provider tokens
 - `VITE_API_BASE_URL`: optional absolute API origin for separately hosted frontends
 
 ### Step-by-step live switch guide
@@ -79,10 +86,11 @@ Use this checklist when you are ready to move ContactBridge from local or stagin
 1. Pick your production shape:
    - **Single host:** deploy the Express API and frontend together with `npm run build`
    - **Split host:** deploy the backend separately and publish the frontend with `npm run build:client` or GitHub Pages
-2. Provision a public backend URL and set `APP_URL` to that exact origin.
+2. Provision a public backend URL, set `APP_MODE=hosted`, and set `APP_URL` to that exact origin.
 3. Choose a persistent SQLite file location and set `CONTACTBRIDGE_DB_PATH` if you do not want to use the default `sqlite.db` in the app directory.
-4. If the frontend will live on a different origin, set `VITE_API_BASE_URL` to the public backend URL before building the frontend.
-5. Install dependencies and verify the release locally:
+4. Set `CONTACTBRIDGE_SECRET_KEY` and configure `CONTACTBRIDGE_CORS_ORIGINS` for the trusted frontend origin.
+5. If the frontend will live on a different origin, set `VITE_API_BASE_URL` to the public backend URL before building the frontend.
+6. Install dependencies and verify the release locally:
 
    ```bash
    npm install
@@ -91,20 +99,20 @@ Use this checklist when you are ready to move ContactBridge from local or stagin
    npm run build
    ```
 
-6. If you already have production data, copy the current SQLite database to the new `CONTACTBRIDGE_DB_PATH` location before starting the new server.
-7. Deploy the backend, start it with `npm run start`, and confirm `GET /api/health` returns `{"status":"ok"}`.
-8. Update OAuth callback settings so every provider points to the live backend:
+7. If you already have production data, copy the current SQLite database to the new `CONTACTBRIDGE_DB_PATH` location before starting the new server.
+8. Deploy the backend, start it with `npm run start`, and confirm `GET /api/health` returns `{"status":"ok","appMode":"hosted"}`.
+9. Update OAuth callback settings so every provider points to the live backend:
    - `https://YOUR_APP_URL/auth/google/callback`
    - `https://YOUR_APP_URL/auth/x/callback`
-9. If you are using a separately hosted frontend, build and publish that frontend only after `VITE_API_BASE_URL` is set for the live backend.
-10. Switch traffic to the live deployment by updating DNS, your reverse proxy, or your public frontend URL.
-11. Run a smoke test in production:
+10. If you are using a separately hosted frontend, build and publish that frontend only after `VITE_API_BASE_URL` is set for the live backend.
+11. Switch traffic to the live deployment by updating DNS, your reverse proxy, or your public frontend URL.
+12. Run a smoke test in production:
     - open the dashboard
     - add or reconnect a source
     - run a sync
     - review candidates
     - export contacts
-12. Keep the previous deployment and database backup until the live instance has been stable long enough for you to roll back safely if needed.
+13. Keep the previous deployment and database backup until the live instance has been stable long enough for you to roll back safely if needed.
 
 ### GitHub Pages frontend deployment
 
@@ -124,7 +132,7 @@ If you fork this repository, update `.github/workflows/deploy-pages.yml` and the
 
 ## Browser extension
 
-The Chrome extension lives in `extension/` and supports manual capture from LinkedIn, X, Bluesky, and XING.
+The Chrome extension lives in `extension/` and supports manual capture from LinkedIn, X, Bluesky, and XING. By default it only sends captured profile data to local hubs such as `http://localhost:3000`; production hub origins must be explicitly packaged into the extension before distribution.
 
 To load it locally:
 

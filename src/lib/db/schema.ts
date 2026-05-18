@@ -11,6 +11,14 @@ export const sourceAccounts = sqliteTable('source_accounts', {
   updatedAt: integer('updated_at', { mode: 'timestamp' })
 });
 
+export const sourceAccountSecrets = sqliteTable('source_account_secrets', {
+  sourceAccountId: text('source_account_id').primaryKey().references(() => sourceAccounts.id),
+  encryptedPayload: text('encrypted_payload').notNull(),
+  encryptionVersion: integer('encryption_version').notNull(),
+  createdAt: integer('created_at', { mode: 'timestamp' }),
+  updatedAt: integer('updated_at', { mode: 'timestamp' })
+});
+
 export const socialProfiles = sqliteTable('social_profiles', {
   id: text('id').primaryKey(),
   sourceType: text('source_type').notNull(),
@@ -49,6 +57,16 @@ export const contactCandidateProfiles = sqliteTable('contact_candidate_profiles'
   socialProfileId: text('social_profile_id').references(() => socialProfiles.id)
 });
 
+export const candidateMatchEvidence = sqliteTable('candidate_match_evidence', {
+  id: text('id').primaryKey(),
+  candidateId: text('candidate_id').references(() => contactCandidates.id),
+  profileId: text('profile_id').references(() => socialProfiles.id),
+  evidenceType: text('evidence_type').notNull(),
+  evidenceValue: text('evidence_value'),
+  score: integer('score').notNull(),
+  createdAt: integer('created_at', { mode: 'timestamp' })
+});
+
 export const syncJobs = sqliteTable('sync_jobs', {
   id: text('id').primaryKey(),
   sourceAccountId: text('source_account_id').references(() => sourceAccounts.id),
@@ -57,4 +75,11 @@ export const syncJobs = sqliteTable('sync_jobs', {
   finishedAt: integer('finished_at', { mode: 'timestamp' }),
   errorCode: text('error_code'),
   errorMessageSafe: text('error_message_safe')
+});
+
+export const appSettings = sqliteTable('app_settings', {
+  key: text('key').primaryKey(),
+  value: text('value').notNull(),
+  createdAt: integer('created_at', { mode: 'timestamp' }),
+  updatedAt: integer('updated_at', { mode: 'timestamp' })
 });
