@@ -229,6 +229,7 @@ const normalizeMastodonInstanceUrl = (instance: string) => {
 };
 
 const MANUAL_CAPTURE_SOURCES = new Set(['bluesky', 'linkedin', 'x', 'xing']);
+const MAX_MANUAL_CAPTURE_BATCH_SIZE = 100;
 const OAUTH_STATE_TTL_MS = 10 * 60 * 1000;
 const VALID_APP_MODES = new Set(['local', 'hosted', 'test']);
 const getDefaultAppMode = () => {
@@ -863,7 +864,7 @@ type NormalizedManualCapturePayload = {
   headline: string,
   handle: string,
   normalizedProfileUrl: string | null,
-  rawPayload: any,
+  rawPayload: unknown,
   source: string,
   sourceProfileId: string
 };
@@ -2824,8 +2825,9 @@ async function startServer() {
       return res.status(400).json({ error: 'At least one profile is required for batch capture.' });
     }
 
-    if (profiles.length > 100) {
-      return res.status(400).json({ error: 'Batch capture is limited to 100 profiles at a time.' });
+    // Keep explicit overview imports bounded so one user click cannot flood the local review queue.
+    if (profiles.length > MAX_MANUAL_CAPTURE_BATCH_SIZE) {
+      return res.status(400).json({ error: `Batch capture is limited to ${MAX_MANUAL_CAPTURE_BATCH_SIZE} profiles at a time.` });
     }
 
     const errors: Array<{ error: string; index: number }> = [];

@@ -9,7 +9,6 @@ document.addEventListener('DOMContentLoaded', () => {
 
   let currentProfile = null;
   let currentProfiles = [];
-  let currentCaptureMode = 'profile';
 
   chrome.storage.sync.get(['apiUrl'], (result) => {
     if (result.apiUrl) {
@@ -53,7 +52,10 @@ document.addEventListener('DOMContentLoaded', () => {
   function setCaptureButton(label, disabled, onClick) {
     captureBtn.textContent = label;
     captureBtn.disabled = disabled;
-    captureBtn.onclick = onClick || null;
+    captureBtn.onclick = null;
+    if (onClick) {
+      captureBtn.onclick = onClick;
+    }
   }
 
   function renderProfileMessage(message) {
@@ -66,7 +68,6 @@ document.addEventListener('DOMContentLoaded', () => {
   function resetCurrentCapture() {
     currentProfile = null;
     currentProfiles = [];
-    currentCaptureMode = 'profile';
   }
 
   function checkCurrentTab() {
@@ -131,7 +132,6 @@ document.addEventListener('DOMContentLoaded', () => {
       }
 
       if (response?.ok && response.profile) {
-        currentCaptureMode = 'profile';
         currentProfile = response.profile;
         renderProfileData(response.profile);
         setCaptureButton('Save this profile', false, saveProfile);
@@ -155,7 +155,6 @@ document.addEventListener('DOMContentLoaded', () => {
       }
 
       if (response?.ok && Array.isArray(response.profiles) && response.profiles.length > 0) {
-        currentCaptureMode = 'overview';
         currentProfiles = response.profiles;
         renderProfileBatchData(response.profiles);
         setCaptureButton('Import visible profiles', false, saveProfiles);
@@ -315,7 +314,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
   function renderProfileBatchData(profiles) {
     profileDataDiv.replaceChildren();
-    appendProfileRow('Source', profiles[0]?.source || 'linkedin', { capitalize: true });
+    appendProfileRow('Source', profiles[0]?.source || 'Not available', { capitalize: true });
     appendProfileRow('Visible profiles', String(profiles.length));
 
     profiles.slice(0, 4).forEach((profile, index) => {

@@ -24,7 +24,7 @@
   ]);
 
   const trimText = (value) => (typeof value === 'string' ? value.replace(/\s+/g, ' ').trim() : '');
-  const toTextLines = (value) => String(value ?? '')
+  const splitAndTrimTextLines = (value) => String(value ?? '')
     .split(/\n+/)
     .map((entry) => trimText(entry))
     .filter(Boolean);
@@ -179,7 +179,7 @@
       trimText(anchor?.innerText),
       trimText(anchor?.textContent),
       trimText(anchor?.ariaLabel),
-      ...toTextLines(card?.innerText).slice(0, 2)
+      ...splitAndTrimTextLines(card?.innerText).slice(0, 2)
     ];
 
     for (const candidate of candidates) {
@@ -202,7 +202,7 @@
   };
 
   const getLinkedInOverviewHeadline = (card, displayName) => {
-    const textLines = toTextLines(card?.innerText);
+    const textLines = splitAndTrimTextLines(card?.innerText);
     const normalizedDisplayName = trimText(displayName).toLowerCase();
 
     return textLines.find((line) => {
