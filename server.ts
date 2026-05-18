@@ -306,6 +306,7 @@ const BACKUP_TABLE_COLUMNS: Record<string, readonly string[]> = Object.freeze({
   sync_jobs: ['id', 'source_account_id', 'status', 'started_at', 'finished_at', 'error_code', 'error_message_safe'],
   relationship_edges: ['id', 'source_account_id', 'social_profile_id', 'relation_type', 'observed_at', 'sync_job_id']
 });
+const CONFIRM_RESTORE_HEADER = 'x-contactbridge-confirm-restore';
 
 const parseOriginList = (value: string | undefined) => (value || '')
   .split(',')
@@ -379,6 +380,31 @@ ensureStartupModeRequirements();
 const trimMaybeString = (value: unknown) => typeof value === 'string' ? value.trim() : '';
 const normalizeProfileHandle = (value: unknown) => trimMaybeString(value).replace(/^@+/, '').toLowerCase();
 const isRecord = (value: unknown): value is Record<string, unknown> => typeof value === 'object' && value !== null && !Array.isArray(value);
+const getValidatedBackupTableName = (tableName: string) => {
+  if (!BACKUP_TABLES.includes(tableName)) {
+    throw new Error(`Unsupported backup table "${tableName}".`);
+  }
+
+  return tableName;
+};
+
+const validateBackupTableSchemas = () => {
+  for (const tableName of BACKUP_TABLES) {
+    const actualColumns = (sqlite.prepare(`PRAGMA table_info(${getValidatedBackupTableName(tableName)})`).all() as Array<{ name: string }>)
+      .map((column) => column.name)
+      .sort();
+    const configuredColumns = [...(BACKUP_TABLE_COLUMNS[tableName] || [])].sort();
+
+    if (
+      actualColumns.length === 0
+      || actualColumns.length !== configuredColumns.length
+      || actualColumns.some((column, index) => column !== configuredColumns[index])
+    ) {
+      throw new Error(`Backup table column configuration is out of sync for "${tableName}".`);
+    }
+  }
+};
+validateBackupTableSchemas();
 
 const getDatabaseReachable = () => {
   try {
@@ -411,7 +437,7 @@ const createDatabaseBackup = () => ({
   exportedAt: new Date().toISOString(),
   tables: Object.fromEntries(BACKUP_TABLES.map((tableName) => [
     tableName,
-    sqlite.prepare(`SELECT * FROM ${tableName}`).all()
+    sqlite.prepare(`SELECT * FROM ${getValidatedBackupTableName(tableName)}`).all()
   ]))
 });
 
@@ -450,13 +476,13 @@ const restoreDatabaseBackup = (payload: unknown) => {
 
   sqlite.transaction(() => {
     for (const tableName of BACKUP_DELETE_ORDER) {
-      sqlite.prepare(`DELETE FROM ${tableName}`).run();
+      sqlite.prepare(`DELETE FROM ${getValidatedBackupTableName(tableName)}`).run();
     }
 
     for (const tableName of BACKUP_INSERT_ORDER) {
       const columns = BACKUP_TABLE_COLUMNS[tableName];
       const statement = sqlite.prepare(`
-        INSERT INTO ${tableName} (${columns.join(', ')})
+        INSERT INTO ${getValidatedBackupTableName(tableName)} (${columns.join(', ')})
         VALUES (${columns.map((column) => `@${column}`).join(', ')})
       `);
 
@@ -1211,7 +1237,7 @@ async function startServer() {
       return res.status(403).json({ error: 'Database restore is only available in local or test mode.' });
     }
 
-    if (req.get('x-contactbridge-confirm-restore') !== 'restore-local-data') {
+    if (req.get(CONFIRM_RESTORE_HEADER) !== 'restore-local-data') {
       return res.status(400).json({ error: 'Database restore requires an explicit confirmation header.' });
     }
 

@@ -10,6 +10,14 @@ type RuntimeStatus = {
   supportsLocalBackupRestore: boolean;
 };
 
+const getErrorMessage = (error: unknown, fallback: string) => {
+  if (error instanceof Error && error.message) {
+    return error.message;
+  }
+
+  return fallback;
+};
+
 export default function SettingsPage() {
   const [isErasing, setIsErasing] = useState(false);
   const [isBackingUp, setIsBackingUp] = useState(false);
@@ -28,14 +36,6 @@ export default function SettingsPage() {
       .then(setRuntimeStatus)
       .catch(console.error);
   }, []);
-
-  const getErrorMessage = (error: unknown, fallback: string) => {
-    if (error instanceof Error && error.message) {
-      return error.message;
-    }
-
-    return fallback;
-  };
 
   const handleEraseDatabase = async () => {
     if (isErasing) {

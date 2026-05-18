@@ -56,6 +56,22 @@ interface ChartTooltipProps {
   payload?: Array<{ payload: ChartDatum }>;
 }
 
+const DashboardTooltip = ({ active, payload }: ChartTooltipProps) => {
+  const data = payload?.[0]?.payload;
+  if (active && data) {
+    return (
+      <div className="bg-white p-3 border rounded shadow-sm text-sm">
+        <p className="font-semibold">{data.name}</p>
+        <p>Status: <span className={data.status === 'failed' ? 'text-red-500 font-medium' : data.status === 'completed' ? 'text-green-500 font-medium' : 'text-blue-500 font-medium'}>{data.status}</span></p>
+        <p>Started: {data.startedAt}</p>
+        <p>Duration: {data.duration}s</p>
+        {data.errorMessage && <p className="text-red-500 mt-1 max-w-xs">{data.errorMessage}</p>}
+      </div>
+    );
+  }
+  return null;
+};
+
 const defaultStats: DashboardStats = {
   totalCandidates: 0,
   approvedContacts: 0,
@@ -173,22 +189,6 @@ export default function Dashboard() {
     { label: 'Export tested', done: Boolean(lastExportAttempt?.ok) },
     { label: 'Extension configured (for manual capture)', done: extensionConfigured }
   ];
-
-  const CustomTooltip = ({ active, payload }: ChartTooltipProps) => {
-    const data = payload?.[0]?.payload;
-    if (active && data) {
-      return (
-        <div className="bg-white p-3 border rounded shadow-sm text-sm">
-          <p className="font-semibold">{data.name}</p>
-          <p>Status: <span className={data.status === 'failed' ? 'text-red-500 font-medium' : data.status === 'completed' ? 'text-green-500 font-medium' : 'text-blue-500 font-medium'}>{data.status}</span></p>
-          <p>Started: {data.startedAt}</p>
-          <p>Duration: {data.duration}s</p>
-          {data.errorMessage && <p className="text-red-500 mt-1 max-w-xs">{data.errorMessage}</p>}
-        </div>
-      );
-    }
-    return null;
-  };
 
   return (
     <div className="p-8 max-w-6xl mx-auto space-y-8">
@@ -371,7 +371,7 @@ export default function Dashboard() {
                   <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#E5E7EB" />
                   <XAxis dataKey="startedAt" fontSize={12} tickLine={false} axisLine={false} />
                   <YAxis fontSize={12} tickLine={false} axisLine={false} />
-                  <Tooltip content={<CustomTooltip />} cursor={{ fill: '#F3F4F6' }} />
+                  <Tooltip content={<DashboardTooltip />} cursor={{ fill: '#F3F4F6' }} />
                   <Bar dataKey="duration" radius={[4, 4, 0, 0]}>
                     {chartData.map((entry, index) => (
                       <Cell key={`cell-${index}`} fill={entry.status === 'failed' ? '#ef4444' : entry.status === 'running' ? '#3b82f6' : '#22c55e'} />

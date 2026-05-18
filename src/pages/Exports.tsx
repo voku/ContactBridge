@@ -30,6 +30,11 @@ const buttonVariants: Record<string, 'default' | 'outline' | 'secondary'> = {
   vcf: 'outline',
   json: 'secondary'
 };
+const createExportAttempt = (format: string, ok: boolean) => ({
+  format,
+  ok,
+  timestamp: new Date().toISOString()
+});
 
 export default function Exports() {
   const [exportFormats, setExportFormats] = useState<ExportFormat[]>([]);
@@ -73,20 +78,12 @@ export default function Exports() {
       a.click();
       URL.revokeObjectURL(url);
 
-      const nextAttempt = {
-        format,
-        ok: true,
-        timestamp: new Date().toISOString()
-      };
+      const nextAttempt = createExportAttempt(format, true);
       setLastExportAttempt(nextAttempt);
       setLastExportAttemptState(nextAttempt);
       toast.success(`Downloaded ${format.toUpperCase()} export`);
     } catch (e) {
-      const nextAttempt = {
-        format,
-        ok: false,
-        timestamp: new Date().toISOString()
-      };
+      const nextAttempt = createExportAttempt(format, false);
       setLastExportAttempt(nextAttempt);
       setLastExportAttemptState(nextAttempt);
       toast.error('Failed to export data');
