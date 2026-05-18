@@ -17,6 +17,19 @@ export const apiUrl = (path: string) => {
   return `${baseUrl}${normalizedPath}`;
 };
 
+export const getHubUrl = () => {
+  const baseUrl = getApiBaseUrl();
+  if (!baseUrl) {
+    return window.location.origin;
+  }
+
+  try {
+    return new URL(baseUrl).origin;
+  } catch {
+    return window.location.origin;
+  }
+};
+
 export const getAllowedPopupOrigins = () => {
   const allowedOrigins = new Set<string>([window.location.origin]);
   const apiBaseUrl = getApiBaseUrl();

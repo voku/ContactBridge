@@ -879,6 +879,139 @@ test('database erase route requires explicit confirmation and stays blocked in h
   assert.equal(hostedDeleteResponse.status, 403);
 });
 
+test('database backup works in test and local mode, and restore reloads backed-up data', async (t) => {
+  const testServer = await startServer();
+  t.after(() => stopServer(testServer));
+
+  const sourceAccount = await postJson<{ id: string }>(testServer.baseUrl, '/api/source-accounts', {
+    sourceType: 'github',
+    accountIdentifier: 'demo-backup-account',
+    displayName: 'Demo Backup Account',
+    authStatus: 'connected'
+  });
+
+  const candidate = await postJson<{ id: string }>(testServer.baseUrl, '/api/capture/manual', {
+    source: 'linkedin',
+    profileUrl: 'https://www.linkedin.com/in/backup-person',
+    displayName: 'Backup Person',
+    handle: 'backup-person'
+  });
+  await patchJson(testServer.baseUrl, `/api/candidates/${candidate.id}`, { status: 'approved' });
+
+  const backupResponse = await fetch(`${testServer.baseUrl}/api/database/backup`);
+  assert.equal(backupResponse.ok, true);
+  const backup = await backupResponse.json() as {
+    format: string;
+    tables: Record<string, Array<Record<string, unknown>>>;
+  };
+  assert.equal(backup.format, 'contactbridge-backup-v1');
+  assert.equal(backup.tables.source_accounts.length, 1);
+  assert.equal(backup.tables.contact_candidates.length, 1);
+
+  const localServer = await startServer({ appMode: 'local', nodeEnv: 'development' });
+  t.after(() => stopServer(localServer));
+
+  const restoreResponse = await fetch(`${localServer.baseUrl}/api/database/restore`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'X-ContactBridge-Confirm-Restore': 'restore-local-data'
+    },
+    body: JSON.stringify(backup)
+  });
+  assert.equal(restoreResponse.ok, true);
+
+  const localBackupResponse = await fetch(`${localServer.baseUrl}/api/database/backup`);
+  assert.equal(localBackupResponse.ok, true);
+
+  const restoredDashboard = await getJson<{ approvedContacts: number; indexedProfiles: number }>(localServer.baseUrl, '/api/dashboard');
+  assert.equal(restoredDashboard.approvedContacts, 1);
+  assert.equal(restoredDashboard.indexedProfiles, 1);
+
+  const restoredSourceAccounts = await getJson<Array<{ id: string }>>(localServer.baseUrl, '/api/source-accounts');
+  assert.deepEqual(restoredSourceAccounts.map((account) => account.id), [sourceAccount.id]);
+});
+
+test('database backup stays blocked in hosted mode', async (t) => {
+  const hostedServer = await startServer({
+    appMode: 'hosted',
+    nodeEnv: 'production',
+    envOverrides: {
+      CONTACTBRIDGE_CORS_ORIGINS: 'https://ui.example.test',
+      CONTACTBRIDGE_SECRET_KEY: 'hosted-test-secret'
+    },
+    healthCheckOrigin: 'https://ui.example.test'
+  });
+  t.after(() => stopServer(hostedServer));
+
+  const response = await fetch(`${hostedServer.baseUrl}/api/database/backup`, {
+    headers: { Origin: 'https://ui.example.test' }
+  });
+  assert.equal(response.status, 403);
+});
+
+test('database restore requires explicit confirmation header', async (t) => {
+  const localServer = await startServer({ appMode: 'local', nodeEnv: 'development' });
+  t.after(() => stopServer(localServer));
+
+  const response = await fetch(`${localServer.baseUrl}/api/database/restore`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      format: 'contactbridge-backup-v1',
+      tables: {
+        app_settings: [],
+        source_accounts: [],
+        source_account_secrets: [],
+        social_profiles: [],
+        contact_candidates: [],
+        contact_candidate_profiles: [],
+        candidate_match_evidence: [],
+        sync_jobs: [],
+        relationship_edges: []
+      }
+    })
+  });
+  assert.equal(response.status, 400);
+});
+
+test('database restore stays blocked in hosted mode', async (t) => {
+  const hostedServer = await startServer({
+    appMode: 'hosted',
+    nodeEnv: 'production',
+    envOverrides: {
+      CONTACTBRIDGE_CORS_ORIGINS: 'https://ui.example.test',
+      CONTACTBRIDGE_SECRET_KEY: 'hosted-test-secret'
+    },
+    healthCheckOrigin: 'https://ui.example.test'
+  });
+  t.after(() => stopServer(hostedServer));
+
+  const response = await fetch(`${hostedServer.baseUrl}/api/database/restore`, {
+    method: 'POST',
+    headers: {
+      Origin: 'https://ui.example.test',
+      'Content-Type': 'application/json',
+      'X-ContactBridge-Confirm-Restore': 'restore-local-data'
+    },
+    body: JSON.stringify({
+      format: 'contactbridge-backup-v1',
+      tables: {
+        app_settings: [],
+        source_accounts: [],
+        source_account_secrets: [],
+        social_profiles: [],
+        contact_candidates: [],
+        contact_candidate_profiles: [],
+        candidate_match_evidence: [],
+        sync_jobs: [],
+        relationship_edges: []
+      }
+    })
+  });
+  assert.equal(response.status, 403);
+});
+
 test('cors enforces hosted allowlist, rejects hosted no-origin, and allows loopback in local mode', async (t) => {
   const hostedServer = await startServer({
     appMode: 'hosted',
