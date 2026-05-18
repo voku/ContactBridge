@@ -56,12 +56,12 @@ Use any of these demo-safe inputs:
 
 - Bluesky: identifier `demo.bsky.social`, password `demo-app-password`
 - Mastodon: instance `mastodon.social`, token `demo-token`
-- X: access token `demo-token`
+- X: access token optional in demo fixture mode (`demo-token` still works if you want to fill the field)
 - LinkedIn: handle `demo-linkedin`, token `demo-token`
 - GitHub: token `demo-token`
 - Google Contacts: token `demo-token`
 
-Then run sync for that source. When demo fixtures are enabled, ContactBridge loads local fixture data instead of real provider data.
+Then run sync for that source. When demo fixtures are enabled, ContactBridge loads local fixture data instead of real provider data, avoids real provider API calls, and fixture-backed X sync does not require a real credential.
 
 ## 6. Capture one manual profile with the extension
 

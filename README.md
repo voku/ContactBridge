@@ -25,6 +25,7 @@ ContactBridge helps a single operator collect social/contact data from supported
 - Exports approved contacts as CSV, JSON, or VCF
 - Supports local backup, restore, and full local reset in `APP_MODE=local` or `APP_MODE=test`
 - Supports safe demo flows with bundled fixture data via `npm run demo`
+- Keeps demo fixture syncs local and credential-free for fixture-backed provider coverage, including X
 - Provides smoke verification with `npm run smoke`
 
 ## Known limitations
@@ -123,7 +124,7 @@ flowchart LR
 
 - `npm run dev`: start the local Express + Vite app
 - `npm run demo`: start the app with bundled demo fixtures enabled
-- `npm run test:integration`: run backend integration tests with bundled demo fixtures
+- `npm run test:integration`: run backend integration tests with bundled demo fixtures and no real provider API calls
 - `npm run lint`: run TypeScript checks
 - `npm run build:client`: build the static frontend only
 - `npm run build`: build the frontend and bundle the Node server
