@@ -6,7 +6,8 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger, DialogFooter } from '@/components/ui/dialog';
 import { toast } from 'sonner';
-import { apiUrl, getAllowedPopupOrigins } from '@/lib/api';
+import { apiUrl, getAllowedPopupOrigins, getHubUrl } from '@/lib/api';
+import { setExtensionConfigured } from '@/lib/localBeta';
 import { runSyncTask } from '@/lib/syncUtils';
 
 const parseSyncError = (platform: string, rawError: string) => {
@@ -113,21 +114,33 @@ const ExtensionSetupDialog = ({ triggerLabel = 'Extension Setup' }: { triggerLab
           <li>Enable <strong>Developer mode</strong> in the top right.</li>
           <li>Click <strong>Load unpacked</strong> and select the <code>extension</code> folder.</li>
           <li>Click the extension icon in Chrome to open the Side Panel.</li>
-          <li>Enter the following Hub URL when prompted:</li>
+          <li>Enter the following local hub URL when prompted:</li>
         </ol>
         <div className="bg-gray-100 p-3 rounded-md flex items-center justify-between">
-          <code className="text-blue-600 font-mono text-xs">{window.location.origin}</code>
+          <code className="text-blue-600 font-mono text-xs">{getHubUrl()}</code>
           <Button size="sm" variant="outline" onClick={() => {
-            navigator.clipboard.writeText(window.location.origin);
-            toast.success('URL copied');
+            navigator.clipboard.writeText(getHubUrl());
+            setExtensionConfigured(true);
+            toast.success('Hub URL copied');
           }}>Copy</Button>
         </div>
-        <p className="text-xs text-gray-500 mt-2">
-          The extension uses Optional Permissions. You only grant it access to the specific sites you want to capture from.
-        </p>
+        <div className="space-y-2 text-xs text-gray-500 mt-2">
+          <p>The extension validates <code>{`${getHubUrl()}/api/extension/health`}</code> before saving the hub.</p>
+          <p>The extension uses Optional Permissions. You only grant it access to the specific sites you want to capture from.</p>
+          <p>Packaged production extension builds must explicitly include any non-local hub origins before distribution.</p>
+        </div>
       </div>
       <DialogFooter>
-        <Button type="button" variant="outline" onClick={() => document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }))}>Done</Button>
+        <Button
+          type="button"
+          variant="outline"
+          onClick={() => {
+            setExtensionConfigured(true);
+            document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }));
+          }}
+        >
+          Mark setup reviewed
+        </Button>
       </DialogFooter>
     </DialogContent>
   </Dialog>

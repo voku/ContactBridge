@@ -1,9 +1,10 @@
-import { useState, useEffect } from 'react';
+import { useEffect, useState } from 'react';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
-import { Users, AlertCircle, CheckCircle2, UserPlus, Clock, XCircle } from 'lucide-react';
+import { Users, AlertCircle, CheckCircle2, UserPlus, Clock, XCircle, Server, Database, Plug, Rocket } from 'lucide-react';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Cell } from 'recharts';
 import { format, differenceInSeconds } from 'date-fns';
-import { apiUrl } from '@/lib/api';
+import { apiUrl, getHubUrl } from '@/lib/api';
+import { getLastExportAttempt, isExtensionConfigured } from '@/lib/localBeta';
 
 interface SyncJob {
   id: string;
@@ -15,23 +16,125 @@ interface SyncJob {
   errorMessage: string | null;
 }
 
+interface DashboardStats {
+  totalCandidates: number;
+  approvedContacts: number;
+  indexedProfiles: number;
+  failedSyncJobs: number;
+}
+
+interface SourceAccount {
+  id: string;
+}
+
+interface ExportFormat {
+  format: string;
+  path: string;
+}
+
+interface RuntimeStatus {
+  appMode: 'local' | 'test' | 'hosted';
+  backendReachable: boolean;
+  databaseReachable: boolean;
+  demoDataConfigured: boolean;
+  exportFormats: ExportFormat[];
+  extensionHealthPath: string;
+  hostedWarning: string | null;
+}
+
+const defaultStats: DashboardStats = {
+  totalCandidates: 0,
+  approvedContacts: 0,
+  indexedProfiles: 0,
+  failedSyncJobs: 0
+};
+
+const statusClassName = (ok: boolean) => ok
+  ? 'border-green-200 bg-green-50 text-green-700'
+  : 'border-gray-200 bg-gray-50 text-gray-600';
+
 export default function Dashboard() {
-  const [stats, setStats] = useState({ totalCandidates: 0, approvedContacts: 0, indexedProfiles: 0, failedSyncJobs: 0 });
+  const [stats, setStats] = useState<DashboardStats>(defaultStats);
   const [syncJobs, setSyncJobs] = useState<SyncJob[]>([]);
+  const [runtimeStatus, setRuntimeStatus] = useState<RuntimeStatus | null>(null);
+  const [sourceAccountCount, setSourceAccountCount] = useState(0);
+  const [exportsAvailable, setExportsAvailable] = useState<Record<string, boolean>>({});
+  const [extensionHealthAvailable, setExtensionHealthAvailable] = useState(false);
+  const [backendReachable, setBackendReachable] = useState(false);
+  const [loadError, setLoadError] = useState('');
+  const [lastExportAttempt, setLastExportAttempt] = useState(getLastExportAttempt());
+  const [extensionConfigured, setExtensionConfiguredState] = useState(isExtensionConfigured());
 
   useEffect(() => {
-    fetch(apiUrl('/api/dashboard'))
-      .then(r => r.json())
-      .then(setStats)
-      .catch(console.error);
+    const load = async () => {
+      try {
+        const [statusData, statsData, syncJobsData, sourceAccountsData] = await Promise.all([
+          fetch(apiUrl('/api/status')).then((r) => {
+            if (!r.ok) throw new Error('Failed to load runtime status');
+            return r.json() as Promise<RuntimeStatus>;
+          }),
+          fetch(apiUrl('/api/dashboard')).then((r) => {
+            if (!r.ok) throw new Error('Failed to load dashboard stats');
+            return r.json() as Promise<DashboardStats>;
+          }),
+          fetch(apiUrl('/api/dashboard/sync-jobs')).then((r) => {
+            if (!r.ok) throw new Error('Failed to load sync jobs');
+            return r.json() as Promise<SyncJob[]>;
+          }),
+          fetch(apiUrl('/api/source-accounts')).then((r) => {
+            if (!r.ok) throw new Error('Failed to load source accounts');
+            return r.json() as Promise<SourceAccount[]>;
+          })
+        ]);
 
-    fetch(apiUrl('/api/dashboard/sync-jobs'))
-      .then(r => r.json())
-      .then(setSyncJobs)
-      .catch(console.error);
+        setRuntimeStatus(statusData);
+        setStats(statsData);
+        setSyncJobs(syncJobsData);
+        setSourceAccountCount(sourceAccountsData.length);
+        setBackendReachable(true);
+        setLoadError('');
+
+        const exportChecks = await Promise.all(
+          statusData.exportFormats.map(async ({ format, path }) => {
+            try {
+              const response = await fetch(apiUrl(path), { method: 'HEAD' });
+              return [format, response.ok] as const;
+            } catch {
+              return [format, false] as const;
+            }
+          })
+        );
+        setExportsAvailable(Object.fromEntries(exportChecks));
+
+        try {
+          const response = await fetch(apiUrl(statusData.extensionHealthPath));
+          setExtensionHealthAvailable(response.ok);
+        } catch {
+          setExtensionHealthAvailable(false);
+        }
+      } catch (error) {
+        console.error(error);
+        setBackendReachable(false);
+        setLoadError(error instanceof Error ? error.message : 'Failed to load dashboard');
+      }
+    };
+
+    load();
+
+    const onStorage = () => {
+      setLastExportAttempt(getLastExportAttempt());
+      setExtensionConfiguredState(isExtensionConfigured());
+    };
+
+    window.addEventListener('storage', onStorage);
+    window.addEventListener('focus', onStorage);
+    return () => {
+      window.removeEventListener('storage', onStorage);
+      window.removeEventListener('focus', onStorage);
+    };
   }, []);
 
-  const chartData = syncJobs.map(job => {
+  const chartData = syncJobs.map((job) => {
     const start = new Date(job.startedAt);
     const end = job.finishedAt ? new Date(job.finishedAt) : new Date();
     const duration = Math.max(1, differenceInSeconds(end, start));
@@ -43,9 +146,21 @@ export default function Dashboard() {
       errorMessage: job.errorMessage,
       sourceType: job.sourceType,
     };
-  }).reverse(); // chronological order for chart
+  }).reverse();
 
-  const CustomTooltip = ({ active, payload, label }: any) => {
+  const exportFormats = runtimeStatus?.exportFormats ?? [];
+  const allExportsAvailable = exportFormats.length > 0 && exportFormats.every(({ format }) => exportsAvailable[format]);
+  const checklistItems = [
+    { label: 'Backend running', done: backendReachable },
+    { label: 'Database reachable', done: runtimeStatus?.databaseReachable ?? false },
+    { label: 'At least one source account configured', done: sourceAccountCount > 0 },
+    { label: 'At least one profile imported or captured', done: stats.indexedProfiles > 0 },
+    { label: 'At least one candidate approved', done: stats.approvedContacts > 0 },
+    { label: 'Export tested', done: Boolean(lastExportAttempt?.ok) },
+    { label: 'Extension configured (for manual capture)', done: extensionConfigured }
+  ];
+
+  const CustomTooltip = ({ active, payload }: any) => {
     if (active && payload && payload.length) {
       const data = payload[0].payload;
       return (
@@ -65,7 +180,122 @@ export default function Dashboard() {
     <div className="p-8 max-w-6xl mx-auto space-y-8">
       <div>
         <h1 className="text-2xl font-semibold tracking-tight">Dashboard</h1>
-        <p className="text-gray-500 mt-1">Overview of your social contact hub.</p>
+        <p className="text-gray-500 mt-1">Local-first beta onboarding, setup state, and sync history.</p>
+      </div>
+
+      <div className="grid grid-cols-1 xl:grid-cols-[1.2fr,0.8fr] gap-6">
+        <Card>
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2">
+              <Rocket className="w-5 h-5 text-blue-600" />
+              First-run onboarding
+            </CardTitle>
+            <CardDescription>Use this to confirm your local beta setup before importing, reviewing, and exporting contacts.</CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            {loadError && (
+              <div className="rounded-md border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+                {loadError}
+              </div>
+            )}
+
+            {runtimeStatus?.hostedWarning && (
+              <div className="rounded-md border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
+                {runtimeStatus.hostedWarning}
+              </div>
+            )}
+
+            <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
+              <div className={`rounded-md border px-4 py-3 ${statusClassName(Boolean(runtimeStatus))}`}>
+                <div className="text-xs font-medium uppercase tracking-wide text-gray-500">APP_MODE</div>
+                <div className="mt-1 text-sm font-semibold">{runtimeStatus?.appMode || 'unavailable'}</div>
+              </div>
+              <div className={`rounded-md border px-4 py-3 ${statusClassName(backendReachable)}`}>
+                <div className="text-xs font-medium uppercase tracking-wide text-gray-500">Backend</div>
+                <div className="mt-1 text-sm font-semibold">{backendReachable ? 'Reachable' : 'Unavailable'}</div>
+              </div>
+              <div className={`rounded-md border px-4 py-3 ${statusClassName(runtimeStatus?.databaseReachable ?? false)}`}>
+                <div className="text-xs font-medium uppercase tracking-wide text-gray-500">Database</div>
+                <div className="mt-1 text-sm font-semibold">{runtimeStatus?.databaseReachable ? 'Reachable' : 'Unavailable'}</div>
+              </div>
+              <div className={`rounded-md border px-4 py-3 ${statusClassName(allExportsAvailable)}`}>
+                <div className="text-xs font-medium uppercase tracking-wide text-gray-500">Export endpoints</div>
+                <div className="mt-1 text-sm font-semibold">
+                  {exportFormats.length > 0
+                    ? exportFormats.map(({ format }) => `${format.toUpperCase()}:${exportsAvailable[format] ? 'ok' : 'down'}`).join(' · ')
+                    : 'Unavailable'}
+                </div>
+              </div>
+              <div className={`rounded-md border px-4 py-3 ${statusClassName(extensionHealthAvailable)}`}>
+                <div className="text-xs font-medium uppercase tracking-wide text-gray-500">Extension health</div>
+                <div className="mt-1 text-sm font-semibold">{extensionHealthAvailable ? 'Available' : 'Unavailable'}</div>
+              </div>
+              <div className={`rounded-md border px-4 py-3 ${statusClassName(Boolean(runtimeStatus))}`}>
+                <div className="text-xs font-medium uppercase tracking-wide text-gray-500">Runtime type</div>
+                <div className="mt-1 text-sm font-semibold">
+                  {runtimeStatus?.appMode === 'hosted'
+                    ? 'Hosted mode'
+                    : runtimeStatus?.appMode === 'test'
+                      ? 'Test mode'
+                      : runtimeStatus?.appMode === 'local'
+                        ? 'Local mode'
+                        : 'Unavailable'}
+                </div>
+              </div>
+            </div>
+
+            <div className="grid gap-4 lg:grid-cols-3">
+              <div className="rounded-md border bg-gray-50 px-4 py-3 text-sm text-gray-700">
+                <div className="flex items-center gap-2 font-medium text-gray-900">
+                  <Server className="w-4 h-4 text-blue-600" />
+                  Demo fixtures
+                </div>
+                <p className="mt-2">{runtimeStatus?.demoDataConfigured ? 'Configured for safe demo walkthroughs.' : 'Not configured.'}</p>
+              </div>
+              <div className="rounded-md border bg-gray-50 px-4 py-3 text-sm text-gray-700">
+                <div className="flex items-center gap-2 font-medium text-gray-900">
+                  <Plug className="w-4 h-4 text-blue-600" />
+                  Extension hub URL
+                </div>
+                <p className="mt-2 font-mono text-xs break-all">{getHubUrl()}</p>
+              </div>
+              <div className="rounded-md border bg-gray-50 px-4 py-3 text-sm text-gray-700">
+                <div className="flex items-center gap-2 font-medium text-gray-900">
+                  <Database className="w-4 h-4 text-blue-600" />
+                  Last export attempt
+                </div>
+                <p className="mt-2">
+                  {lastExportAttempt
+                    ? `${lastExportAttempt.ok ? 'Passed' : 'Failed'} · ${lastExportAttempt.format.toUpperCase()} · ${format(new Date(lastExportAttempt.timestamp), 'MMM d, h:mm a')}`
+                    : 'No export tested yet.'}
+                </p>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader>
+            <CardTitle>Local beta checklist</CardTitle>
+            <CardDescription>Finish these steps to prove the local-first beta flow is working end to end.</CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-3">
+            {checklistItems.map((item) => (
+              <div key={item.label} className="flex items-start gap-3 rounded-md border px-3 py-3">
+                <div className={`mt-0.5 rounded-full p-1 ${item.done ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-500'}`}>
+                  <CheckCircle2 className="w-4 h-4" />
+                </div>
+                <div className="flex-1">
+                  <p className="text-sm font-medium text-gray-900">{item.label}</p>
+                  <p className="text-xs text-gray-500">{item.done ? 'Complete' : 'Pending'}</p>
+                </div>
+              </div>
+            ))}
+            <p className="text-xs text-gray-500">
+              Only approved candidates are exportable. Use demo fixtures or connect one source, then review and approve at least one candidate.
+            </p>
+          </CardContent>
+        </Card>
       </div>
 
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
@@ -79,7 +309,7 @@ export default function Dashboard() {
             <p className="text-xs text-gray-400 mt-1">Waiting in review queue</p>
           </CardContent>
         </Card>
-        
+
         <Card>
           <CardHeader className="flex flex-row items-center justify-between pb-2 space-y-0">
             <CardTitle className="text-sm font-medium text-gray-500">Approved Contacts</CardTitle>
@@ -113,7 +343,7 @@ export default function Dashboard() {
           </CardContent>
         </Card>
       </div>
-      
+
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
         <Card className="flex flex-col">
           <CardHeader>

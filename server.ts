@@ -257,6 +257,55 @@ const EXTENSION_HEALTH_CAPABILITIES = Object.freeze([
   'profiles.bluesky',
   'profiles.xing'
 ]);
+const EXPORT_FORMATS = Object.freeze([
+  { format: 'csv', path: '/api/exports/contacts.csv' },
+  { format: 'json', path: '/api/exports/contacts.json' },
+  { format: 'vcf', path: '/api/exports/contacts.vcf' }
+]);
+const BACKUP_TABLES = Object.freeze([
+  'app_settings',
+  'source_accounts',
+  'source_account_secrets',
+  'social_profiles',
+  'contact_candidates',
+  'contact_candidate_profiles',
+  'candidate_match_evidence',
+  'sync_jobs',
+  'relationship_edges'
+]);
+const BACKUP_INSERT_ORDER = Object.freeze([
+  'app_settings',
+  'source_accounts',
+  'source_account_secrets',
+  'social_profiles',
+  'contact_candidates',
+  'contact_candidate_profiles',
+  'candidate_match_evidence',
+  'sync_jobs',
+  'relationship_edges'
+]);
+const BACKUP_DELETE_ORDER = Object.freeze([
+  'candidate_match_evidence',
+  'contact_candidate_profiles',
+  'relationship_edges',
+  'sync_jobs',
+  'source_account_secrets',
+  'contact_candidates',
+  'social_profiles',
+  'source_accounts',
+  'app_settings'
+]);
+const BACKUP_TABLE_COLUMNS: Record<string, readonly string[]> = Object.freeze({
+  app_settings: ['key', 'value', 'created_at', 'updated_at'],
+  source_accounts: ['id', 'source_type', 'account_identifier', 'display_name', 'auth_status', 'auth_data', 'created_at', 'updated_at'],
+  source_account_secrets: ['source_account_id', 'encrypted_payload', 'encryption_version', 'created_at', 'updated_at'],
+  social_profiles: ['id', 'source_type', 'source_profile_id', 'handle', 'display_name', 'profile_url', 'avatar_url', 'bio', 'raw_public_payload_json', 'first_seen_at', 'last_seen_at'],
+  contact_candidates: ['id', 'canonical_name', 'confidence_score', 'status', 'notes', 'created_at', 'updated_at'],
+  contact_candidate_profiles: ['contact_candidate_id', 'social_profile_id'],
+  candidate_match_evidence: ['id', 'candidate_id', 'profile_id', 'evidence_type', 'evidence_value', 'score', 'created_at'],
+  sync_jobs: ['id', 'source_account_id', 'status', 'started_at', 'finished_at', 'error_code', 'error_message_safe'],
+  relationship_edges: ['id', 'source_account_id', 'social_profile_id', 'relation_type', 'observed_at', 'sync_job_id']
+});
 
 const parseOriginList = (value: string | undefined) => (value || '')
   .split(',')
@@ -329,6 +378,94 @@ ensureStartupModeRequirements();
 
 const trimMaybeString = (value: unknown) => typeof value === 'string' ? value.trim() : '';
 const normalizeProfileHandle = (value: unknown) => trimMaybeString(value).replace(/^@+/, '').toLowerCase();
+const isRecord = (value: unknown): value is Record<string, unknown> => typeof value === 'object' && value !== null && !Array.isArray(value);
+
+const getDatabaseReachable = () => {
+  try {
+    const result = sqlite.prepare('SELECT 1 AS ok').get() as { ok?: number } | undefined;
+    return result?.ok === 1;
+  } catch {
+    return false;
+  }
+};
+
+const getRuntimeStatus = () => ({
+  appMode: APP_MODE,
+  backendReachable: true,
+  databaseReachable: getDatabaseReachable(),
+  demoDataConfigured: Boolean(process.env.CONTACTBRIDGE_DEMO_DATA_DIR?.trim()),
+  exportFormats: EXPORT_FORMATS,
+  extensionHealthPath: '/api/extension/health',
+  extensionHealthAvailable: true,
+  supportsLocalBackupRestore: allowsLocalOnlyRoutes,
+  localOnlyRoutesEnabled: allowsLocalOnlyRoutes,
+  modeLabel: APP_MODE,
+  hostedWarning: isHostedMode ? 'Hosted multi-user usage is not supported yet.' : null,
+  localFirstBeta: true
+});
+
+const createDatabaseBackup = () => ({
+  format: 'contactbridge-backup-v1',
+  appName: 'ContactBridge',
+  appMode: APP_MODE,
+  exportedAt: new Date().toISOString(),
+  tables: Object.fromEntries(BACKUP_TABLES.map((tableName) => [
+    tableName,
+    sqlite.prepare(`SELECT * FROM ${tableName}`).all()
+  ]))
+});
+
+const normalizeBackupTableRows = (tableName: string, rows: unknown) => {
+  if (!Array.isArray(rows)) {
+    throw new Error(`Backup table "${tableName}" is missing or invalid.`);
+  }
+
+  const expectedColumns = BACKUP_TABLE_COLUMNS[tableName];
+  return rows.map((row) => {
+    if (!isRecord(row)) {
+      throw new Error(`Backup table "${tableName}" contains an invalid row.`);
+    }
+
+    return Object.fromEntries(expectedColumns.map((column) => [column, row[column] ?? null]));
+  });
+};
+
+const restoreDatabaseBackup = (payload: unknown) => {
+  if (!isRecord(payload)) {
+    throw new Error('Restore payload must be a JSON object.');
+  }
+
+  if (payload.format !== 'contactbridge-backup-v1') {
+    throw new Error('Unsupported backup format.');
+  }
+
+  if (!isRecord(payload.tables)) {
+    throw new Error('Backup payload is missing table data.');
+  }
+
+  const normalizedTables = Object.fromEntries(BACKUP_TABLES.map((tableName) => [
+    tableName,
+    normalizeBackupTableRows(tableName, payload.tables[tableName])
+  ]));
+
+  sqlite.transaction(() => {
+    for (const tableName of BACKUP_DELETE_ORDER) {
+      sqlite.prepare(`DELETE FROM ${tableName}`).run();
+    }
+
+    for (const tableName of BACKUP_INSERT_ORDER) {
+      const columns = BACKUP_TABLE_COLUMNS[tableName];
+      const statement = sqlite.prepare(`
+        INSERT INTO ${tableName} (${columns.join(', ')})
+        VALUES (${columns.map((column) => `@${column}`).join(', ')})
+      `);
+
+      for (const row of normalizedTables[tableName] as Array<Record<string, unknown>>) {
+        statement.run(row);
+      }
+    }
+  })();
+};
 
 type SourceAccountAuthData = {
   accessToken?: string;
@@ -1012,6 +1149,10 @@ async function startServer() {
     res.json({ status: "ok", appMode: APP_MODE });
   });
 
+  app.get('/api/status', (req, res) => {
+    res.json(getRuntimeStatus());
+  });
+
   app.get('/api/extension/health', (req, res) => {
     res.json({
       appMode: APP_MODE,
@@ -1046,6 +1187,41 @@ async function startServer() {
       const errorMessage = e instanceof Error ? e.message : "Failed to erase database";
       console.error("Failed to erase database:", e);
       res.status(500).json({ error: errorMessage });
+    }
+  });
+
+  app.get('/api/database/backup', (req, res) => {
+    if (!allowsLocalOnlyRoutes) {
+      return res.status(403).json({ error: 'Database backup is only available in local or test mode.' });
+    }
+
+    try {
+      res.setHeader('Content-Type', 'application/json; charset=utf-8');
+      res.setHeader('Content-Disposition', 'attachment; filename="contactbridge-backup.json"');
+      res.send(JSON.stringify(createDatabaseBackup(), null, 2));
+    } catch (e: unknown) {
+      const errorMessage = e instanceof Error ? e.message : 'Failed to create database backup';
+      console.error('Failed to create database backup:', e);
+      res.status(500).json({ error: errorMessage });
+    }
+  });
+
+  app.post('/api/database/restore', (req, res) => {
+    if (!allowsLocalOnlyRoutes) {
+      return res.status(403).json({ error: 'Database restore is only available in local or test mode.' });
+    }
+
+    if (req.get('x-contactbridge-confirm-restore') !== 'restore-local-data') {
+      return res.status(400).json({ error: 'Database restore requires an explicit confirmation header.' });
+    }
+
+    try {
+      restoreDatabaseBackup(req.body);
+      res.json({ success: true });
+    } catch (e: unknown) {
+      const errorMessage = e instanceof Error ? e.message : 'Failed to restore database backup';
+      console.error('Failed to restore database backup:', e);
+      res.status(400).json({ error: errorMessage });
     }
   });
 

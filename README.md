@@ -26,7 +26,7 @@ The local development server runs the Express backend and serves the Vite fronte
 - Node.js 22+
 - npm
 
-## Local development
+## Local-first beta quickstart
 
 1. Install dependencies:
 
@@ -40,13 +40,14 @@ The local development server runs the Express backend and serves the Vite fronte
    cp .env.example .env.local
    ```
 
-3. Set the values you need:
+3. Edit `.env.local` for local-first beta use:
 
    - `APP_MODE`: `local`, `test`, or `hosted`; defaults to `test` when `NODE_ENV=test`, `local` when `NODE_ENV=development`, and `hosted` otherwise
-   - `APP_URL`: public backend URL used for OAuth callbacks
-   - `CONTACTBRIDGE_CORS_ORIGINS`: comma-separated frontend origins allowed to call the API when hosted
-   - `CONTACTBRIDGE_SECRET_KEY`: required in hosted mode to encrypt provider tokens
-   - `VITE_API_BASE_URL`: optional frontend API origin when the UI is hosted separately
+   - `APP_URL`: use `http://localhost:3000` for local OAuth callback testing
+   - `CONTACTBRIDGE_CORS_ORIGINS`: only needed for hosted or split-origin setups
+   - `CONTACTBRIDGE_SECRET_KEY`: only required in hosted mode
+   - `VITE_API_BASE_URL`: leave unset for same-origin local use
+   - `CONTACTBRIDGE_DEMO_DATA_DIR`: keep `./test/demo-data` to enable safe demo fixture imports
 
 4. Start the app:
 
@@ -56,14 +57,54 @@ The local development server runs the Express backend and serves the Vite fronte
 
 5. Open `http://localhost:3000`.
 
+6. Open the dashboard and confirm:
+   - backend reachable
+   - database reachable
+   - export endpoints available
+   - extension health available
+   - current `APP_MODE`
+
+7. Run a demo walkthrough without real provider tokens:
+
+   ```bash
+   npm run demo
+   ```
+
+   Then connect one demo source from **Sources** and run a sync, or point `CONTACTBRIDGE_DEMO_DATA_DIR` at your own fixture directory before starting the app.
+
+8. Load the extension from `extension/`:
+   - open `chrome://extensions`
+   - enable **Developer mode**
+   - choose **Load unpacked**
+   - select `/home/runner/work/ContactBridge/ContactBridge/extension`
+   - set the hub URL to `http://localhost:3000`
+
+9. Capture one profile with the extension or import one profile from a configured source.
+
+10. Open **Review Queue** and approve at least one candidate.
+
+11. Open **Exports** and download CSV, JSON, or VCF. Only approved candidates are exported.
+
+12. Run the local smoke check while the app is running:
+
+   ```bash
+   npm run smoke
+   ```
+
+## Local development
+
+The quickstart above is the recommended local-first beta workflow. Use the sections below when you need deployment, extension, export, or verification details.
+
 ## Scripts
 
 - `npm run dev`: start the local Express + Vite app
+- `npm run demo`: start the app with bundled demo fixtures enabled
 - `npm run test:integration`: run backend integration tests with bundled demo fixtures
 - `npm run lint`: run TypeScript checks
 - `npm run build:client`: build the static frontend only
 - `npm run build`: build the frontend and bundle the Node server
 - `npm run start`: run the production server bundle
+- `npm run smoke`: verify `/api/health`, `/api/extension/health`, and export endpoints against `http://127.0.0.1:3000` (or `CONTACTBRIDGE_BASE_URL`)
 
 ## Production deployment
 
@@ -156,6 +197,30 @@ To load it locally:
 2. Enable **Developer mode**
 3. Choose **Load unpacked**
 4. Select `extension/`
+5. Set the hub URL to `http://localhost:3000`
+6. Production extension builds must explicitly package any non-local hub origins before distribution
+
+## Demo mode
+
+ContactBridge can run safely with local demo fixtures so you can test imports without real provider tokens.
+
+1. Keep `CONTACTBRIDGE_DEMO_DATA_DIR="./test/demo-data"` in `.env.local`, or run:
+
+   ```bash
+   npm run demo
+   ```
+
+2. Start the app and connect a supported source from **Sources**.
+3. Run the sync flow. ContactBridge will load local JSON fixtures instead of live provider data when a matching fixture file exists.
+4. Review, approve, and export the demo contacts just like a real local session.
+
+`CONTACTBRIDGE_DEMO_DATA_DIR` is exposed in runtime status only as an enabled/disabled flag; the app does not leak fixture filesystem paths.
+
+## Local backup and restore
+
+- `GET /api/database/backup`: download a local/test JSON backup of the SQLite-backed data
+- `POST /api/database/restore`: restore a local/test backup with `x-contactbridge-confirm-restore: restore-local-data`
+- Hosted mode blocks both restore and other local-only destructive flows
 
 ## Key Files Detector helper prompt
 
@@ -173,6 +238,7 @@ Before opening a pull request, run:
 npm run test:integration
 npm run lint
 npm run build
+npm run smoke
 ```
 
 ## Local-first beta boundaries

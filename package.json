@@ -9,12 +9,14 @@
   },
   "scripts": {
     "dev": "tsx server.ts",
+    "demo": "CONTACTBRIDGE_DEMO_DATA_DIR=./test/demo-data npm run dev",
     "test:integration": "node --import tsx --test test/integration/*.test.ts",
     "build:client": "vite build",
     "build": "vite build && esbuild server.ts --bundle --platform=node --format=cjs --packages=external --sourcemap --outfile=dist/server.cjs",
     "start": "node dist/server.cjs",
     "clean": "rm -rf dist server.js",
-    "lint": "tsc --noEmit"
+    "lint": "tsc --noEmit",
+    "smoke": "node scripts/smoke.mjs"
   },
   "dependencies": {
     "@atproto/api": "^0.19.18",
