@@ -378,6 +378,17 @@ ensureStartupModeRequirements();
 
 
 const trimMaybeString = (value: unknown) => typeof value === 'string' ? value.trim() : '';
+const getSafeSyncErrorMessage = (error: unknown, fallback = 'Unknown error occurred during sync') => {
+  const rawMessage = error instanceof Error
+    ? error.message
+    : (error === null || error === undefined ? '' : String(error));
+  const sanitizedMessage = rawMessage
+    .replace(/Bearer\s+[A-Za-z0-9._~+/=-]+/gi, 'Bearer [redacted]')
+    .replace(/(access[_ -]?token["'=:\s]+)([^,\s]+)/gi, '$1[redacted]')
+    .replace(/(refresh[_ -]?token["'=:\s]+)([^,\s]+)/gi, '$1[redacted]');
+
+  return trimMaybeString(sanitizedMessage) || fallback;
+};
 const normalizeProfileHandle = (value: unknown) => trimMaybeString(value).replace(/^@+/, '').toLowerCase();
 const isRecord = (value: unknown): value is Record<string, unknown> => typeof value === 'object' && value !== null && !Array.isArray(value);
 const getValidatedBackupTableName = (tableName: string) => {
@@ -2041,16 +2052,19 @@ async function startServer() {
       const storedAuth = rawAccessToken ? null : getStoredSourceAccountAuth(sourceAccountId).authData;
       const accessToken = trimMaybeString(rawAccessToken) || trimMaybeString(storedAuth?.accessToken);
 
-      if (!accessToken) {
-        throw new Error('An X access token is required. Please reconnect your X account.');
-      }
-
       if (demoData) {
         stream.progress('Loading demo data...');
         followers = demoData.followersResponse?.data || [];
         follows = demoData.followingResponse?.data || [];
       } else {
+        if (!accessToken) {
+          throw new Error('An X access token is required. Please reconnect your X account.');
+        }
+
         stream.progress('Connecting to API...');
+        if (isTestMode && trimMaybeString(process.env.CONTACTBRIDGE_TEST_X_SYNC_ERROR_MESSAGE)) {
+          throw new Error(process.env.CONTACTBRIDGE_TEST_X_SYNC_ERROR_MESSAGE);
+        }
         const client = new TwitterApi(accessToken);
 
         const userRes = await client.v2.me();
@@ -2156,14 +2170,15 @@ async function startServer() {
 
       stream.success({ success: true, count: allProfilesMap.size, insertedCount, updatedCount });
     } catch (e: any) {
+      const safeErrorMessage = getSafeSyncErrorMessage(e);
       console.error(e);
       db.update(schema.syncJobs).set({ 
         status: 'failed', 
         finishedAt: new Date(),
         errorCode: 'SYNC_ERROR',
-        errorMessageSafe: e.message || 'Unknown error occurred during sync'
+        errorMessageSafe: safeErrorMessage
       }).where(eq(schema.syncJobs.id, syncJobId)).run();
-      stream.error(e.message);
+      stream.error(safeErrorMessage);
     }
   });
 

@@ -89,7 +89,7 @@ const checks = [
       expectHeaderIncludes(response, 'content-type', 'text/csv');
       const body = await response.text();
       if (!body.startsWith('Name,Source,Handle,Profile URL,Notes')) {
-        throw new Error('CSV export did not include the expected header row.');
+        throw new Error('CSV export did not include the expected header row for an empty-or-approved export response.');
       }
     }
   },
@@ -110,8 +110,8 @@ const checks = [
     validate: async (response) => {
       expectHeaderIncludes(response, 'content-type', 'text/vcard');
       const body = await response.text();
-      if (typeof body !== 'string') {
-        throw new Error('VCF export did not return text.');
+      if (typeof body !== 'string' || (body.length > 0 && !body.includes('BEGIN:VCARD'))) {
+        throw new Error('VCF export did not return text in the expected empty-or-vCard format.');
       }
     }
   }
@@ -135,6 +135,7 @@ if (runtimeStatus?.appMode === 'local' || runtimeStatus?.appMode === 'test') {
 }
 
 console.log(`Smoke base URL: ${baseUrl}`);
+console.log(`Smoke APP_MODE: ${runtimeStatus?.appMode || 'unknown'}`);
 console.log('Smoke endpoints:');
 for (const check of checks) {
   console.log(`- ${check.label}: ${check.path}`);

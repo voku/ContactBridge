@@ -13,6 +13,7 @@
       "acct": "carol@mastodon.social",
       "display_name": "Carol Demo",
       "username": "carol",
+      "url": "https://mastodon.social/@carol",
       "avatar": "https://files.mastodon.social/accounts/avatars/900001/original.png",
       "note": "<p>Open source maintainer</p>"
     }
@@ -23,6 +24,7 @@
       "acct": "dave@fosstodon.org",
       "display_name": "Dave Demo",
       "username": "dave",
+      "url": "https://fosstodon.org/@dave",
       "avatar": "https://media.fosstodon.org/accounts/avatars/900002/original.png",
       "note": "<p>Community builder</p>"
     }

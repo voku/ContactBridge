@@ -42,7 +42,7 @@ const syncCases: SyncCase[] = [
     sourceType: 'x',
     endpoint: '/api/sync/x',
     payload: { accessToken: 'demo-token' },
-    expectedNames: ['Eve Demo', 'Frank Demo']
+    expectedNames: ['Eve Demo', 'Shared Demo', 'frank_demo']
   },
   {
     name: 'linkedin',
@@ -299,6 +299,91 @@ const postSync = async <T>(baseUrl: string, pathname: string, body: Record<strin
   return successPayload as T;
 };
 
+const postSyncExpectError = async <T>(baseUrl: string, pathname: string, body: Record<string, unknown>): Promise<T> => {
+  const response = await fetch(`${baseUrl}${pathname}`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body)
+  });
+
+  assert.equal(response.ok, true, `Expected ${pathname} to return a streamed response`);
+  const text = await response.text();
+  const payloads = text
+    .split('\n')
+    .map((line) => line.trim())
+    .filter(Boolean)
+    .map((line) => JSON.parse(line));
+
+  const errorPayload = payloads.find((payload) => payload.type === 'error');
+  assert.ok(errorPayload, `Expected ${pathname} to emit an error payload`);
+  return errorPayload as T;
+};
+
+const createOverrideDemoDataDir = async (t: test.TestContext) => {
+  const overrideDemoDataRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'contactbridge-demo-'));
+  const overrideDemoDataDir = path.join(overrideDemoDataRoot, 'fixtures');
+  await fs.cp(demoDataDir, overrideDemoDataDir, { recursive: true });
+  t.after(async () => {
+    await fs.rm(overrideDemoDataRoot, { recursive: true, force: true });
+  });
+  return overrideDemoDataDir;
+};
+
+type ProfileSnapshot = {
+  sourceType: string;
+  sourceProfileId: string;
+  handle: string | null;
+  displayName: string | null;
+  bio: string | null;
+  profileUrl: string | null;
+  relationTypes: string[];
+};
+
+const getProfileSnapshots = (sqlite: any, sourceType: string, sourceAccountId: string): ProfileSnapshot[] => {
+  const profiles = sqlite.prepare(`
+    SELECT id, source_type AS sourceType, source_profile_id AS sourceProfileId, handle, display_name AS displayName, bio, profile_url AS profileUrl
+    FROM social_profiles
+    WHERE source_type = ?
+    ORDER BY source_profile_id
+  `).all(sourceType) as Array<{
+    id: string;
+    sourceType: string;
+    sourceProfileId: string;
+    handle: string | null;
+    displayName: string | null;
+    bio: string | null;
+    profileUrl: string | null;
+  }>;
+
+  return profiles.map((profile) => ({
+    ...profile,
+    relationTypes: (sqlite.prepare(`
+      SELECT relation_type AS relationType
+      FROM relationship_edges
+      WHERE source_account_id = ? AND social_profile_id = ?
+      ORDER BY relation_type
+    `).all(sourceAccountId, profile.id) as Array<{ relationType: string }>).map((row) => row.relationType)
+  }));
+};
+
+const getCandidateProfileLinkStats = (sqlite: any) => (
+  sqlite.prepare(`
+    SELECT
+      COUNT(*) AS totalCount,
+      COUNT(DISTINCT contact_candidate_id || ':' || social_profile_id) AS distinctCount
+    FROM contact_candidate_profiles
+  `).get() as { totalCount: number; distinctCount: number }
+);
+
+const getSyncJobStatusRows = (sqlite: any, sourceAccountId: string) => (
+  sqlite.prepare(`
+    SELECT status, error_message_safe AS errorMessageSafe
+    FROM sync_jobs
+    WHERE source_account_id = ?
+    ORDER BY started_at
+  `).all(sourceAccountId) as Array<{ status: string; errorMessageSafe: string | null }>
+);
+
 for (const syncCase of syncCases) {
   test(`syncs ${syncCase.name} demo data end-to-end`, async (t) => {
     const server = await startServer();
@@ -348,6 +433,596 @@ for (const syncCase of syncCases) {
     assert.equal(jobs[0]?.sourceType, syncCase.sourceType);
   });
 }
+
+type ProviderCoverageCase = {
+  name: string;
+  sourceType: string;
+  endpoint: string;
+  payload: Record<string, unknown>;
+  expectedProfiles: ProfileSnapshot[];
+  rewriteFixture: (fixtureDir: string) => Promise<void>;
+  expectedProfilesAfterRewrite: ProfileSnapshot[];
+};
+
+const providerCoverageCases: ProviderCoverageCase[] = [
+  {
+    name: 'bluesky',
+    sourceType: 'bluesky',
+    endpoint: '/api/sync/bluesky',
+    payload: { identifier: 'demo.bsky.social', password: 'demo-app-password' },
+    expectedProfiles: [
+      {
+        sourceType: 'bluesky',
+        sourceProfileId: 'did:plc:alice-demo',
+        handle: 'alice-demo.bsky.social',
+        displayName: 'Alice Demo',
+        bio: 'Design systems lead',
+        profileUrl: null,
+        relationTypes: ['followed_by']
+      },
+      {
+        sourceType: 'bluesky',
+        sourceProfileId: 'did:plc:bob-demo',
+        handle: 'bob-demo.bsky.social',
+        displayName: 'Bob Demo',
+        bio: 'Backend engineer',
+        profileUrl: null,
+        relationTypes: ['follows']
+      }
+    ],
+    rewriteFixture: async (fixtureDir) => {
+      await fs.writeFile(path.join(fixtureDir, 'bluesky.json'), JSON.stringify({
+        followersResponse: {
+          subject: { did: 'did:plc:contactbridge-demo', handle: 'contactbridge-demo.bsky.social', displayName: 'ContactBridge Demo' },
+          followers: [],
+          cursor: 'followers-cursor-demo-2'
+        },
+        followsResponse: {
+          subject: { did: 'did:plc:contactbridge-demo', handle: 'contactbridge-demo.bsky.social', displayName: 'ContactBridge Demo' },
+          follows: [
+            {
+              did: 'did:plc:alice-demo',
+              handle: 'alice-demo.bsky.social',
+              displayName: 'Alice Demo',
+              avatar: 'https://cdn.bsky.app/img/avatar/plain/did:plc:alice-demo/bafkreialicedemo@jpeg',
+              description: 'Design systems lead',
+              viewer: { following: 'at://did:plc:contactbridge-demo/app.bsky.graph.follow/alice-follow-2', followedBy: null }
+            }
+          ],
+          cursor: 'follows-cursor-demo-2'
+        }
+      }, null, 2));
+    },
+    expectedProfilesAfterRewrite: [
+      {
+        sourceType: 'bluesky',
+        sourceProfileId: 'did:plc:alice-demo',
+        handle: 'alice-demo.bsky.social',
+        displayName: 'Alice Demo',
+        bio: 'Design systems lead',
+        profileUrl: null,
+        relationTypes: ['follows']
+      }
+    ]
+  },
+  {
+    name: 'mastodon',
+    sourceType: 'mastodon',
+    endpoint: '/api/sync/mastodon',
+    payload: { instance: 'mastodon.social', token: 'demo-token' },
+    expectedProfiles: [
+      {
+        sourceType: 'mastodon',
+        sourceProfileId: '900001',
+        handle: 'carol@mastodon.social',
+        displayName: 'Carol Demo',
+        bio: 'Open source maintainer',
+        profileUrl: null,
+        relationTypes: ['followed_by']
+      },
+      {
+        sourceType: 'mastodon',
+        sourceProfileId: '900002',
+        handle: 'dave@fosstodon.org',
+        displayName: 'Dave Demo',
+        bio: 'Community builder',
+        profileUrl: null,
+        relationTypes: ['follows']
+      }
+    ],
+    rewriteFixture: async (fixtureDir) => {
+      await fs.writeFile(path.join(fixtureDir, 'mastodon.json'), JSON.stringify({
+        selfAccount: {
+          id: '109876',
+          username: 'contactbridge',
+          acct: 'contactbridge',
+          display_name: 'ContactBridge Demo',
+          avatar: 'https://files.example.social/accounts/avatars/contactbridge/original.png',
+          note: '<p>ContactBridge test account</p>'
+        },
+        followers: [],
+        following: [
+          {
+            id: '900001',
+            acct: 'carol@mastodon.social',
+            display_name: 'Carol Demo',
+            username: 'carol',
+            url: 'https://mastodon.social/@carol',
+            avatar: 'https://files.mastodon.social/accounts/avatars/900001/original.png',
+            note: '<p>Open source maintainer</p>'
+          }
+        ]
+      }, null, 2));
+    },
+    expectedProfilesAfterRewrite: [
+      {
+        sourceType: 'mastodon',
+        sourceProfileId: '900001',
+        handle: 'carol@mastodon.social',
+        displayName: 'Carol Demo',
+        bio: 'Open source maintainer',
+        profileUrl: null,
+        relationTypes: ['follows']
+      }
+    ]
+  },
+  {
+    name: 'github',
+    sourceType: 'github',
+    endpoint: '/api/sync/github',
+    payload: { token: 'demo-token' },
+    expectedProfiles: [
+      {
+        sourceType: 'github',
+        sourceProfileId: '101',
+        handle: 'ivan-demo',
+        displayName: 'ivan-demo',
+        bio: '',
+        profileUrl: null,
+        relationTypes: ['followed_by']
+      },
+      {
+        sourceType: 'github',
+        sourceProfileId: '102',
+        handle: 'judy-demo',
+        displayName: 'judy-demo',
+        bio: '',
+        profileUrl: null,
+        relationTypes: ['follows']
+      }
+    ],
+    rewriteFixture: async (fixtureDir) => {
+      await fs.writeFile(path.join(fixtureDir, 'github.json'), JSON.stringify({
+        followersResponse: [],
+        followingResponse: [
+          {
+            login: 'ivan-demo',
+            id: 101,
+            avatar_url: 'https://avatars.githubusercontent.com/u/101?v=4',
+            url: 'https://api.github.com/users/ivan-demo',
+            html_url: 'https://github.com/ivan-demo',
+            type: 'User',
+            site_admin: false
+          }
+        ]
+      }, null, 2));
+    },
+    expectedProfilesAfterRewrite: [
+      {
+        sourceType: 'github',
+        sourceProfileId: '101',
+        handle: 'ivan-demo',
+        displayName: 'ivan-demo',
+        bio: '',
+        profileUrl: null,
+        relationTypes: ['follows']
+      }
+    ]
+  },
+  {
+    name: 'google',
+    sourceType: 'google',
+    endpoint: '/api/sync/google',
+    payload: { token: 'demo-token' },
+    expectedProfiles: [
+      {
+        sourceType: 'google',
+        sourceProfileId: 'people/cathy-demo',
+        handle: 'cathy@example.com',
+        displayName: 'Cathy Demo',
+        bio: 'Partnerships manager',
+        profileUrl: 'https://example.com/cathy',
+        relationTypes: []
+      },
+      {
+        sourceType: 'google',
+        sourceProfileId: 'people/louis-demo',
+        handle: 'louis@example.com',
+        displayName: 'Louis Demo',
+        bio: 'Engineering Manager at Example Co',
+        profileUrl: 'https://example.com/louis',
+        relationTypes: []
+      }
+    ],
+    rewriteFixture: async (fixtureDir) => {
+      await fs.writeFile(path.join(fixtureDir, 'google.json'), JSON.stringify({
+        pages: [
+          {
+            connections: [
+              {
+                resourceName: 'people/cathy-demo',
+                etag: '%EgUBAQc=',
+                names: [{ displayName: 'Cathy Demo', givenName: 'Cathy', familyName: 'Demo' }],
+                emailAddresses: [{ value: 'cathy@example.com' }],
+                photos: [{ url: 'https://lh3.googleusercontent.com/a-/cathy-demo', default: false }],
+                biographies: [{ value: 'Partnerships manager' }],
+                urls: [{ value: 'https://example.com/cathy' }]
+              }
+            ]
+          }
+        ]
+      }, null, 2));
+    },
+    expectedProfilesAfterRewrite: [
+      {
+        sourceType: 'google',
+        sourceProfileId: 'people/cathy-demo',
+        handle: 'cathy@example.com',
+        displayName: 'Cathy Demo',
+        bio: 'Partnerships manager',
+        profileUrl: 'https://example.com/cathy',
+        relationTypes: []
+      }
+    ]
+  }
+];
+
+for (const providerCase of providerCoverageCases) {
+  test(`provider sync coverage for ${providerCase.name} inserts records, dedupes reruns, and removes stale data`, async (t) => {
+    const overrideDemoDataDir = await createOverrideDemoDataDir(t);
+    const server = await startServer({ demoDataDir: overrideDemoDataDir });
+    t.after(() => stopServer(server));
+
+    const sourceAccount = await postJson<{ id: string }>(server.baseUrl, '/api/source-accounts', {
+      sourceType: providerCase.sourceType,
+      accountIdentifier: `${providerCase.name}-coverage-account`,
+      displayName: `${providerCase.name} coverage`,
+      authStatus: 'pending'
+    });
+
+    const sqlite = new Database(server.dbPath);
+    t.after(() => sqlite.close());
+
+    const firstSync = await postSync<{ success: boolean; count: number }>(server.baseUrl, providerCase.endpoint, {
+      sourceAccountId: sourceAccount.id,
+      ...providerCase.payload
+    });
+    assert.equal(firstSync.success, true);
+    assert.equal(firstSync.count, providerCase.expectedProfiles.length);
+    assert.deepEqual(getProfileSnapshots(sqlite, providerCase.sourceType, sourceAccount.id), providerCase.expectedProfiles);
+
+    const relationshipCount = sqlite.prepare(`
+      SELECT COUNT(*) AS count FROM relationship_edges WHERE source_account_id = ?
+    `).get(sourceAccount.id) as { count: number };
+    assert.equal(relationshipCount.count, providerCase.expectedProfiles.reduce((sum, profile) => sum + profile.relationTypes.length, 0));
+
+    const firstLinkStats = getCandidateProfileLinkStats(sqlite);
+    assert.equal(firstLinkStats.totalCount, providerCase.expectedProfiles.length);
+    assert.equal(firstLinkStats.totalCount, firstLinkStats.distinctCount);
+
+    const firstCandidates = await getJson<Array<{ id: string }>>(server.baseUrl, '/api/candidates');
+    assert.equal(firstCandidates.length, providerCase.expectedProfiles.length);
+
+    const secondSync = await postSync<{ success: boolean; count: number }>(server.baseUrl, providerCase.endpoint, {
+      sourceAccountId: sourceAccount.id,
+      ...providerCase.payload
+    });
+    assert.equal(secondSync.success, true);
+    assert.equal(secondSync.count, providerCase.expectedProfiles.length);
+    assert.deepEqual(getProfileSnapshots(sqlite, providerCase.sourceType, sourceAccount.id), providerCase.expectedProfiles);
+
+    const secondLinkStats = getCandidateProfileLinkStats(sqlite);
+    assert.equal(secondLinkStats.totalCount, providerCase.expectedProfiles.length);
+    assert.equal(secondLinkStats.totalCount, secondLinkStats.distinctCount);
+
+    await providerCase.rewriteFixture(overrideDemoDataDir);
+
+    const thirdSync = await postSync<{ success: boolean; count: number }>(server.baseUrl, providerCase.endpoint, {
+      sourceAccountId: sourceAccount.id,
+      ...providerCase.payload
+    });
+    assert.equal(thirdSync.success, true);
+    assert.equal(thirdSync.count, providerCase.expectedProfilesAfterRewrite.length);
+    assert.deepEqual(getProfileSnapshots(sqlite, providerCase.sourceType, sourceAccount.id), providerCase.expectedProfilesAfterRewrite);
+
+    const thirdLinkStats = getCandidateProfileLinkStats(sqlite);
+    assert.equal(thirdLinkStats.totalCount, providerCase.expectedProfilesAfterRewrite.length);
+    assert.equal(thirdLinkStats.totalCount, thirdLinkStats.distinctCount);
+
+    const thirdCandidates = await getJson<Array<{ id: string }>>(server.baseUrl, '/api/candidates');
+    assert.equal(thirdCandidates.length, providerCase.expectedProfilesAfterRewrite.length);
+
+    assert.deepEqual(getSyncJobStatusRows(sqlite, sourceAccount.id).map((row) => row.status), ['completed', 'completed', 'completed']);
+  });
+}
+
+test('x demo fixture sync works without real credentials, merges mutual relations, and replaces stale relationships', async (t) => {
+  const overrideDemoDataDir = await createOverrideDemoDataDir(t);
+  const server = await startServer({ demoDataDir: overrideDemoDataDir });
+  t.after(() => stopServer(server));
+
+  const sourceAccount = await postJson<{ id: string }>(server.baseUrl, '/api/source-accounts', {
+    sourceType: 'x',
+    accountIdentifier: 'x-coverage-account',
+    displayName: 'x coverage',
+    authStatus: 'pending'
+  });
+
+  const sqlite = new Database(server.dbPath);
+  t.after(() => sqlite.close());
+
+  const firstSync = await postSync<{ success: boolean; count: number; insertedCount: number; updatedCount: number }>(server.baseUrl, '/api/sync/x', {
+    sourceAccountId: sourceAccount.id
+  });
+  assert.equal(firstSync.success, true);
+  assert.equal(firstSync.count, 3);
+  assert.equal(firstSync.insertedCount, 3);
+  assert.equal(firstSync.updatedCount, 0);
+
+  assert.deepEqual(getProfileSnapshots(sqlite, 'x', sourceAccount.id), [
+    {
+      sourceType: 'x',
+      sourceProfileId: '1450081635559428107',
+      handle: 'eve_demo',
+      displayName: 'Eve Demo',
+      bio: 'AI researcher',
+      profileUrl: null,
+      relationTypes: ['followed_by']
+    },
+    {
+      sourceType: 'x',
+      sourceProfileId: '1550000000000000000',
+      handle: 'shared_demo',
+      displayName: 'Shared Demo',
+      bio: 'Mutual follow',
+      profileUrl: null,
+      relationTypes: ['followed_by', 'follows']
+    },
+    {
+      sourceType: 'x',
+      sourceProfileId: '1605503331234567890',
+      handle: 'frank_demo',
+      displayName: 'frank_demo',
+      bio: 'Developer advocate',
+      profileUrl: null,
+      relationTypes: ['follows']
+    }
+  ]);
+
+  const sharedProfile = sqlite.prepare(`
+    SELECT source_type AS sourceType, source_profile_id AS sourceProfileId, handle, display_name AS displayName, bio, avatar_url AS avatarUrl
+    FROM social_profiles
+    WHERE source_type = 'x' AND source_profile_id = '1550000000000000000'
+  `).get() as { sourceType: string; sourceProfileId: string; handle: string; displayName: string; bio: string; avatarUrl: string };
+  assert.deepEqual(sharedProfile, {
+    sourceType: 'x',
+    sourceProfileId: '1550000000000000000',
+    handle: 'shared_demo',
+    displayName: 'Shared Demo',
+    bio: 'Mutual follow',
+    avatarUrl: 'https://pbs.twimg.com/profile_images/1550000000000000000/shared_demo_normal.jpg'
+  });
+
+  const firstLinkStats = getCandidateProfileLinkStats(sqlite);
+  assert.equal(firstLinkStats.totalCount, 3);
+  assert.equal(firstLinkStats.totalCount, firstLinkStats.distinctCount);
+
+  const secondSync = await postSync<{ success: boolean; count: number; insertedCount: number; updatedCount: number }>(server.baseUrl, '/api/sync/x', {
+    sourceAccountId: sourceAccount.id
+  });
+  assert.equal(secondSync.success, true);
+  assert.equal(secondSync.count, 3);
+  assert.equal(secondSync.insertedCount, 0);
+  assert.equal(secondSync.updatedCount, 3);
+
+  const secondLinkStats = getCandidateProfileLinkStats(sqlite);
+  assert.equal(secondLinkStats.totalCount, 3);
+  assert.equal(secondLinkStats.totalCount, secondLinkStats.distinctCount);
+
+  await fs.writeFile(path.join(overrideDemoDataDir, 'x.json'), JSON.stringify({
+    followersResponse: { data: [], meta: { result_count: 0 } },
+    followingResponse: {
+      data: [
+        {
+          id: '1550000000000000000',
+          username: 'shared_demo',
+          name: 'Shared Demo',
+          profile_image_url: 'https://pbs.twimg.com/profile_images/1550000000000000000/shared_demo_normal.jpg',
+          description: 'Mutual follow'
+        },
+        {
+          id: '1605503331234567890',
+          username: 'frank_demo',
+          name: '',
+          profile_image_url: 'https://pbs.twimg.com/profile_images/1605503331234567890/frank_demo_normal.jpg',
+          description: 'Developer advocate'
+        }
+      ],
+      meta: { result_count: 2 }
+    }
+  }, null, 2));
+
+  const thirdSync = await postSync<{ success: boolean; count: number }>(server.baseUrl, '/api/sync/x', {
+    sourceAccountId: sourceAccount.id
+  });
+  assert.equal(thirdSync.success, true);
+  assert.equal(thirdSync.count, 2);
+
+  assert.deepEqual(getProfileSnapshots(sqlite, 'x', sourceAccount.id), [
+    {
+      sourceType: 'x',
+      sourceProfileId: '1550000000000000000',
+      handle: 'shared_demo',
+      displayName: 'Shared Demo',
+      bio: 'Mutual follow',
+      profileUrl: null,
+      relationTypes: ['follows']
+    },
+    {
+      sourceType: 'x',
+      sourceProfileId: '1605503331234567890',
+      handle: 'frank_demo',
+      displayName: 'frank_demo',
+      bio: 'Developer advocate',
+      profileUrl: null,
+      relationTypes: ['follows']
+    }
+  ]);
+  assert.deepEqual(getSyncJobStatusRows(sqlite, sourceAccount.id).map((row) => row.status), ['completed', 'completed', 'completed']);
+});
+
+test('x sync requires a token only when fixture mode is unavailable', async (t) => {
+  const emptyDemoDataDir = await fs.mkdtemp(path.join(os.tmpdir(), 'contactbridge-empty-demo-'));
+  t.after(async () => {
+    await fs.rm(emptyDemoDataDir, { recursive: true, force: true });
+  });
+
+  const server = await startServer({ demoDataDir: emptyDemoDataDir });
+  t.after(() => stopServer(server));
+
+  const sourceAccount = await postJson<{ id: string }>(server.baseUrl, '/api/source-accounts', {
+    sourceType: 'x',
+    accountIdentifier: 'x-real-mode-account',
+    displayName: 'x real mode',
+    authStatus: 'pending'
+  });
+
+  const sqlite = new Database(server.dbPath);
+  t.after(() => sqlite.close());
+
+  const errorPayload = await postSyncExpectError<{ error: string }>(server.baseUrl, '/api/sync/x', {
+    sourceAccountId: sourceAccount.id
+  });
+  assert.match(errorPayload.error, /access token is required/i);
+
+  assert.deepEqual(getSyncJobStatusRows(sqlite, sourceAccount.id), [
+    { status: 'failed', errorMessageSafe: 'An X access token is required. Please reconnect your X account.' }
+  ]);
+});
+
+test('x sync records failed jobs with sanitized error messages when API mode fails', async (t) => {
+  const emptyDemoDataDir = await fs.mkdtemp(path.join(os.tmpdir(), 'contactbridge-empty-demo-'));
+  t.after(async () => {
+    await fs.rm(emptyDemoDataDir, { recursive: true, force: true });
+  });
+
+  const server = await startServer({
+    demoDataDir: emptyDemoDataDir,
+    envOverrides: {
+      CONTACTBRIDGE_TEST_X_SYNC_ERROR_MESSAGE: 'X upstream rejected Bearer secret-token while reading accessToken=secret-token'
+    }
+  });
+  t.after(() => stopServer(server));
+
+  const sourceAccount = await postJson<{ id: string }>(server.baseUrl, '/api/source-accounts', {
+    sourceType: 'x',
+    accountIdentifier: 'x-api-error-account',
+    displayName: 'x api error',
+    authStatus: 'pending'
+  });
+
+  const sqlite = new Database(server.dbPath);
+  t.after(() => sqlite.close());
+
+  const errorPayload = await postSyncExpectError<{ error: string }>(server.baseUrl, '/api/sync/x', {
+    sourceAccountId: sourceAccount.id,
+    accessToken: 'secret-token'
+  });
+  assert.equal(errorPayload.error.includes('secret-token'), false);
+  assert.match(errorPayload.error, /Bearer \[redacted\]/);
+
+  const jobRows = getSyncJobStatusRows(sqlite, sourceAccount.id);
+  assert.equal(jobRows.length, 1);
+  assert.equal(jobRows[0]?.status, 'failed');
+  assert.equal(jobRows[0]?.errorMessageSafe?.includes('secret-token'), false);
+  assert.match(jobRows[0]?.errorMessageSafe || '', /accessToken=\[redacted\]/);
+});
+
+test('same source profile id reuses one candidate across accounts', async (t) => {
+  const overrideDemoDataDir = await createOverrideDemoDataDir(t);
+  const githubFixturePath = path.join(overrideDemoDataDir, 'github.json');
+  await fs.writeFile(githubFixturePath, JSON.stringify({
+    followersResponse: [
+      { id: 777, login: 'shared-identity', avatar_url: 'https://avatars.githubusercontent.com/u/777?v=4', url: 'https://api.github.com/users/shared-identity', html_url: 'https://github.com/shared-identity' }
+    ],
+    followingResponse: []
+  }, null, 2));
+
+  const server = await startServer({ demoDataDir: overrideDemoDataDir });
+  t.after(() => stopServer(server));
+
+  const firstAccount = await postJson<{ id: string }>(server.baseUrl, '/api/source-accounts', {
+    sourceType: 'github',
+    accountIdentifier: 'github-shared-1',
+    displayName: 'github shared 1',
+    authStatus: 'pending'
+  });
+  await postSync(server.baseUrl, '/api/sync/github', { sourceAccountId: firstAccount.id, token: 'demo-token' });
+
+  await fs.writeFile(githubFixturePath, JSON.stringify({
+    followersResponse: [],
+    followingResponse: [
+      { id: 777, login: 'shared-identity-renamed', avatar_url: 'https://avatars.githubusercontent.com/u/777?v=4', url: 'https://api.github.com/users/shared-identity-renamed', html_url: 'https://github.com/shared-identity-renamed' }
+    ]
+  }, null, 2));
+
+  const secondAccount = await postJson<{ id: string }>(server.baseUrl, '/api/source-accounts', {
+    sourceType: 'github',
+    accountIdentifier: 'github-shared-2',
+    displayName: 'github shared 2',
+    authStatus: 'pending'
+  });
+  await postSync(server.baseUrl, '/api/sync/github', { sourceAccountId: secondAccount.id, token: 'demo-token' });
+
+  const candidates = await getJson<Array<{ id: string; canonicalName: string; profiles: Array<{ sourceType: string; handle: string | null }> }>>(server.baseUrl, '/api/candidates');
+  assert.equal(candidates.length, 1);
+  assert.equal(candidates[0]?.profiles.length, 1);
+  assert.equal(candidates[0]?.profiles[0]?.sourceType, 'github');
+  assert.equal(candidates[0]?.profiles[0]?.handle, 'shared-identity-renamed');
+});
+
+test('manual merge preserves approved status and combined notes', async (t) => {
+  const server = await startServer();
+  t.after(() => stopServer(server));
+
+  const primaryCandidate = await postJson<{ id: string }>(server.baseUrl, '/api/capture/manual', {
+    source: 'linkedin',
+    profileUrl: 'https://www.linkedin.com/in/merge-primary',
+    displayName: 'Merge Primary',
+    handle: 'merge-primary'
+  });
+  const secondaryCandidate = await postJson<{ id: string }>(server.baseUrl, '/api/capture/manual', {
+    source: 'x',
+    profileUrl: 'https://x.com/merge-secondary',
+    displayName: 'Merge Secondary',
+    handle: 'merge-secondary'
+  });
+
+  await patchJson(server.baseUrl, `/api/candidates/${primaryCandidate.id}`, { notes: 'Keep this note', status: 'pending' });
+  await patchJson(server.baseUrl, `/api/candidates/${secondaryCandidate.id}`, { notes: 'Approve this note', status: 'approved' });
+
+  await postJson(server.baseUrl, '/api/candidates/merge', {
+    primaryCandidateId: primaryCandidate.id,
+    secondaryCandidateIds: [secondaryCandidate.id]
+  });
+
+  const candidates = await getJson<Array<{ id: string; status: string; notes: string | null }>>(server.baseUrl, '/api/candidates');
+  assert.deepEqual(candidates, [{
+    id: primaryCandidate.id,
+    status: 'approved',
+    notes: 'Keep this note\n\nApprove this note'
+  }]);
+});
 
 test('sync preserves both relationship directions for mutual Bluesky profiles', async (t) => {
   const overrideDemoDataRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'contactbridge-demo-'));
@@ -715,7 +1390,7 @@ test('x sync can reuse stored OAuth credentials without exposing auth data', asy
   });
 
   assert.equal(syncResult.success, true);
-  assert.equal(syncResult.count, 2);
+  assert.equal(syncResult.count, 3);
 
   const accounts = await getJson<Array<Record<string, unknown>>>(server.baseUrl, '/api/source-accounts');
   const account = accounts.find((entry) => entry.id === sourceAccount.id);
@@ -1069,7 +1744,7 @@ test('x sync migrates legacy auth_data into encrypted secrets and reuses encrypt
     sourceAccountId: sourceAccount.id
   });
   assert.equal(firstSync.success, true);
-  assert.equal(firstSync.count, 2);
+  assert.equal(firstSync.count, 3);
 
   const secretRow = sqlite.prepare(`
     SELECT encrypted_payload AS encryptedPayload
@@ -1091,7 +1766,7 @@ test('x sync migrates legacy auth_data into encrypted secrets and reuses encrypt
     sourceAccountId: sourceAccount.id
   });
   assert.equal(secondSync.success, true);
-  assert.equal(secondSync.count, 2);
+  assert.equal(secondSync.count, 3);
 });
 
 test('disconnect removes stored encrypted source account secrets', async (t) => {
@@ -1300,6 +1975,179 @@ test('backend exports include only approved candidates and escape CSV and VCF va
   assert.match(vcfExport, /FN:Alice "Ace"\\, Demo\\nLine/);
   assert.match(vcfExport, /NOTE:Line one\\,\\nLine two\\; with "quotes"/);
   assert.match(vcfExport, /URL:https:\/\/x\.com\/alice\\;demo/);
+});
+
+test('exports stay valid when empty and only include approved candidates with stable profile URLs', async (t) => {
+  const server = await startServer();
+  t.after(() => stopServer(server));
+
+  assert.deepEqual(JSON.parse(await getText(server.baseUrl, '/api/exports/contacts.json')), []);
+  assert.equal(await getText(server.baseUrl, '/api/exports/contacts.csv'), 'Name,Source,Handle,Profile URL,Notes');
+  assert.equal(await getText(server.baseUrl, '/api/exports/contacts.vcf'), '');
+
+  const githubAccount = await postJson<{ id: string }>(server.baseUrl, '/api/source-accounts', {
+    sourceType: 'github',
+    accountIdentifier: 'github-export-account',
+    displayName: 'github export',
+    authStatus: 'pending'
+  });
+  await postSync(server.baseUrl, '/api/sync/github', { sourceAccountId: githubAccount.id, token: 'demo-token' });
+
+  const blueskyAccount = await postJson<{ id: string }>(server.baseUrl, '/api/source-accounts', {
+    sourceType: 'bluesky',
+    accountIdentifier: 'bluesky-export-account',
+    displayName: 'bluesky export',
+    authStatus: 'pending'
+  });
+  await postSync(server.baseUrl, '/api/sync/bluesky', { sourceAccountId: blueskyAccount.id, identifier: 'demo.bsky.social', password: 'demo-app-password' });
+
+  const mastodonAccount = await postJson<{ id: string }>(server.baseUrl, '/api/source-accounts', {
+    sourceType: 'mastodon',
+    accountIdentifier: 'mastodon-export-account',
+    displayName: 'mastodon export',
+    authStatus: 'pending'
+  });
+  await postSync(server.baseUrl, '/api/sync/mastodon', { sourceAccountId: mastodonAccount.id, instance: 'mastodon.social', token: 'demo-token' });
+
+  const xCandidate = await postJson<{ id: string }>(server.baseUrl, '/api/capture/manual', {
+    source: 'x',
+    profileUrl: 'https://x.com/manual-x-person',
+    displayName: 'Manual X Person',
+    handle: 'manual-x-person'
+  });
+  const linkedinCandidate = await postJson<{ id: string }>(server.baseUrl, '/api/capture/manual', {
+    source: 'linkedin',
+    profileUrl: 'https://www.linkedin.com/in/manual-linkedin-person',
+    displayName: 'Manual LinkedIn Person',
+    handle: 'manual-linkedin-person'
+  });
+  const xingCandidate = await postJson<{ id: string }>(server.baseUrl, '/api/capture/manual', {
+    source: 'xing',
+    profileUrl: 'https://www.xing.com/profile/manual_xing_person',
+    displayName: 'Manual XING Person',
+    handle: 'manual_xing_person'
+  });
+  const ignoredCandidate = await postJson<{ id: string }>(server.baseUrl, '/api/capture/manual', {
+    source: 'linkedin',
+    profileUrl: 'https://www.linkedin.com/in/ignored-person',
+    displayName: 'Ignored Person',
+    handle: 'ignored-person'
+  });
+
+  const candidates = await getJson<Array<{ id: string; canonicalName: string }>>(server.baseUrl, '/api/candidates');
+  const idsByName = new Map(candidates.map((candidate) => [candidate.canonicalName, candidate.id]));
+  const approvedNames = ['ivan-demo', 'Alice Demo', 'Carol Demo', 'Manual X Person', 'Manual LinkedIn Person', 'Manual XING Person'];
+  for (const name of approvedNames) {
+    const candidateId = idsByName.get(name) || (name === 'Manual X Person' ? xCandidate.id : name === 'Manual LinkedIn Person' ? linkedinCandidate.id : xingCandidate.id);
+    await patchJson(server.baseUrl, `/api/candidates/${candidateId}`, { status: 'approved' });
+  }
+  await patchJson(server.baseUrl, `/api/candidates/${ignoredCandidate.id}`, { status: 'ignored' });
+
+  const exportJson = JSON.parse(await getText(server.baseUrl, '/api/exports/contacts.json')) as Array<{ id: string; canonicalName: string }>;
+  assert.deepEqual(exportJson.map((candidate) => candidate.canonicalName).sort(), approvedNames.sort());
+  assert.equal(exportJson.some((candidate) => candidate.id === ignoredCandidate.id), false);
+
+  const csvExport = await getText(server.baseUrl, '/api/exports/contacts.csv');
+  assert.equal(csvExport.includes('Ignored Person'), false);
+  assert.match(csvExport, /https:\/\/github\.com\/ivan-demo/);
+  assert.match(csvExport, /https:\/\/x\.com\/manual-x-person/);
+  assert.match(csvExport, /https:\/\/bsky\.app\/profile\/alice-demo\.bsky\.social/);
+  assert.match(csvExport, /https:\/\/mastodon\.social\/@carol/);
+  assert.match(csvExport, /https:\/\/www\.linkedin\.com\/in\/manual-linkedin-person/);
+  assert.match(csvExport, /https:\/\/www\.xing\.com\/profile\/manual_xing_person/);
+
+  const vcfExport = await getText(server.baseUrl, '/api/exports/contacts.vcf');
+  assert.equal(vcfExport.includes('Ignored Person'), false);
+  assert.match(vcfExport, /URL:https:\/\/github\.com\/ivan-demo/);
+  assert.match(vcfExport, /URL:https:\/\/x\.com\/manual-x-person/);
+  assert.match(vcfExport, /URL:https:\/\/bsky\.app\/profile\/alice-demo\.bsky\.social/);
+  assert.match(vcfExport, /URL:https:\/\/mastodon\.social\/@carol/);
+  assert.match(vcfExport, /URL:https:\/\/www\.linkedin\.com\/in\/manual-linkedin-person/);
+  assert.match(vcfExport, /URL:https:\/\/www\.xing\.com\/profile\/manual_xing_person/);
+});
+
+test('backup and restore preserve backed-up tables and malformed payloads are rejected', async (t) => {
+  const sourceServer = await startServer();
+  t.after(() => stopServer(sourceServer));
+
+  const xAccount = await postJson<{ id: string }>(sourceServer.baseUrl, '/api/source-accounts', {
+    sourceType: 'x',
+    accountIdentifier: 'backup-x-account',
+    displayName: 'backup x',
+    authStatus: 'pending'
+  });
+
+  const sourceSqlite = new Database(sourceServer.dbPath);
+  t.after(() => sourceSqlite.close());
+  sourceSqlite.prepare('UPDATE source_accounts SET auth_data = ? WHERE id = ?').run(
+    JSON.stringify({ accessToken: 'stored-demo-token', refreshToken: 'stored-refresh-token' }),
+    xAccount.id
+  );
+
+  await postSync(sourceServer.baseUrl, '/api/sync/x', { sourceAccountId: xAccount.id });
+  await postJson(sourceServer.baseUrl, '/api/capture/manual', {
+    source: 'linkedin',
+    profileUrl: 'https://www.linkedin.com/in/backup-same-name-one',
+    displayName: 'Backup Same Name',
+    handle: 'backup-same-name-one'
+  });
+  await postJson(sourceServer.baseUrl, '/api/capture/manual', {
+    source: 'x',
+    profileUrl: 'https://x.com/backup-same-name-two',
+    displayName: 'Backup Same Name',
+    handle: 'backup-same-name-two'
+  });
+
+  const backupResponse = await fetch(`${sourceServer.baseUrl}/api/database/backup`);
+  assert.equal(backupResponse.ok, true);
+  const backup = await backupResponse.json() as { format: string; tables: Record<string, Array<Record<string, unknown>>> };
+  assert.equal(backup.format, 'contactbridge-backup-v1');
+  assert.deepEqual(Object.keys(backup.tables).sort(), [
+    'app_settings',
+    'candidate_match_evidence',
+    'contact_candidate_profiles',
+    'contact_candidates',
+    'relationship_edges',
+    'social_profiles',
+    'source_account_secrets',
+    'source_accounts',
+    'sync_jobs'
+  ]);
+  assert.equal(backup.tables.source_accounts.length, 1);
+  assert.equal(backup.tables.source_account_secrets.length, 1);
+  assert.equal(backup.tables.social_profiles.length, 5);
+  assert.equal(backup.tables.relationship_edges.length, 4);
+  assert.equal(backup.tables.contact_candidates.length, 5);
+  assert.equal(backup.tables.contact_candidate_profiles.length, 5);
+  assert.ok(backup.tables.candidate_match_evidence.length >= 1);
+
+  const restoredServer = await startServer({ appMode: 'local', nodeEnv: 'development' });
+  t.after(() => stopServer(restoredServer));
+
+  const restoreResponse = await fetch(`${restoredServer.baseUrl}/api/database/restore`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'X-ContactBridge-Confirm-Restore': 'restore-local-data'
+    },
+    body: JSON.stringify(backup)
+  });
+  assert.equal(restoreResponse.ok, true);
+
+  const restoredBackupResponse = await fetch(`${restoredServer.baseUrl}/api/database/backup`);
+  assert.equal(restoredBackupResponse.ok, true);
+  const restoredBackup = await restoredBackupResponse.json() as { tables: Record<string, Array<Record<string, unknown>>> };
+  assert.deepEqual(restoredBackup.tables, backup.tables);
+
+  const malformedResponse = await fetch(`${restoredServer.baseUrl}/api/database/restore`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'X-ContactBridge-Confirm-Restore': 'restore-local-data'
+    },
+    body: JSON.stringify({ format: 'contactbridge-backup-v1', tables: { source_accounts: 'nope' } })
+  });
+  assert.equal(malformedResponse.status, 400);
 });
 
 test('extension health endpoint returns stable capabilities without secrets', async (t) => {
