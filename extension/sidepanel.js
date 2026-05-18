@@ -22,19 +22,24 @@ document.addEventListener('DOMContentLoaded', () => {
     }
   });
 
-  saveConfigBtn.addEventListener('click', () => {
-    const hubUrl = extensionApi.isAllowedHubUrl(apiUrlInput.value);
-    if (!hubUrl.ok) {
-      showStatus(hubUrl.error, true);
-      return;
-    }
+  saveConfigBtn.addEventListener('click', async () => {
+    try {
+      const hubUrl = await extensionApi.validateHubHealth(apiUrlInput.value);
+      if (!hubUrl.ok) {
+        showStatus(hubUrl.error, true);
+        return;
+      }
 
-    chrome.storage.sync.set({ apiUrl: hubUrl.url }, () => {
-      apiUrlInput.value = hubUrl.url;
-      enableCapture();
-      showStatus('Configuration saved!', false);
-      setTimeout(() => { statusDiv.style.display = 'none'; }, 2000);
-    });
+      chrome.storage.sync.set({ apiUrl: hubUrl.url }, () => {
+        apiUrlInput.value = hubUrl.url;
+        enableCapture();
+        showStatus('Configuration saved!', false);
+        setTimeout(() => { statusDiv.style.display = 'none'; }, 2000);
+      });
+    } catch (error) {
+      console.error('Hub validation error:', error);
+      showStatus('Hub validation failed unexpectedly.', true);
+    }
   });
 
   function enableCapture() {

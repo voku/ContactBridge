@@ -74,6 +74,14 @@ type ServerHandle = {
   dbPath: string;
 };
 
+type StartServerOptions = {
+  appMode?: string;
+  demoDataDir?: string;
+  envOverrides?: Record<string, string | undefined>;
+  healthCheckOrigin?: string;
+  nodeEnv?: string;
+};
+
 const getFreePort = async (): Promise<number> => {
   const server = await import('node:net').then(({ createServer }) => createServer());
   await new Promise<void>((resolve, reject) => {
@@ -90,10 +98,12 @@ const getFreePort = async (): Promise<number> => {
   return port;
 };
 
-const waitForHealth = async (baseUrl: string) => {
+const waitForHealth = async (baseUrl: string, options: { origin?: string } = {}) => {
   for (let attempt = 0; attempt < MAX_HEALTH_CHECK_ATTEMPTS; attempt++) {
     try {
-      const response = await fetch(`${baseUrl}/api/health`);
+      const response = await fetch(`${baseUrl}/api/health`, {
+        ...(options.origin ? { headers: { Origin: options.origin } } : {})
+      });
       if (response.ok) {
         return;
       }
@@ -104,24 +114,29 @@ const waitForHealth = async (baseUrl: string) => {
   throw new Error(`Server did not become healthy: ${baseUrl}`);
 };
 
-const startServer = async (options: { demoDataDir?: string } = {}): Promise<ServerHandle> => {
+const startServer = async (options: StartServerOptions = {}): Promise<ServerHandle> => {
   const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), 'contactbridge-it-'));
   const port = await getFreePort();
   const baseUrl = `http://127.0.0.1:${port}`;
   const dbPath = path.join(tempDir, 'test.sqlite');
+  const env: NodeJS.ProcessEnv = {
+    ...process.env,
+    CONTACTBRIDGE_DB_PATH: dbPath,
+    CONTACTBRIDGE_DEMO_DATA_DIR: options.demoDataDir || demoDataDir,
+    CONTACTBRIDGE_DISABLE_FRONTEND: '1',
+    NODE_ENV: options.nodeEnv || 'test',
+    PORT: String(port),
+    ...options.envOverrides
+  };
+  if (options.appMode !== undefined) {
+    env.APP_MODE = options.appMode;
+  }
   const serverProcess = spawn(
     process.execPath,
     ['--import', 'tsx', path.join(repoRoot, 'server.ts')],
     {
       cwd: repoRoot,
-      env: {
-        ...process.env,
-        CONTACTBRIDGE_DB_PATH: dbPath,
-        CONTACTBRIDGE_DEMO_DATA_DIR: options.demoDataDir || demoDataDir,
-        CONTACTBRIDGE_DISABLE_FRONTEND: '1',
-        NODE_ENV: 'test',
-        PORT: String(port)
-      },
+      env,
       stdio: ['ignore', 'pipe', 'pipe']
     }
   );
@@ -138,13 +153,64 @@ const startServer = async (options: { demoDataDir?: string } = {}): Promise<Serv
   });
 
   try {
-    await waitForHealth(baseUrl);
+    await waitForHealth(baseUrl, { origin: options.healthCheckOrigin });
   } catch (error) {
     serverProcess.kill('SIGTERM');
     throw new Error([(error as Error).message, stderr].filter(Boolean).join('\n'));
   }
 
   return { baseUrl, process: serverProcess, tempDir, dbPath };
+};
+
+const startServerExpectFailure = async (options: StartServerOptions = {}) => {
+  const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), 'contactbridge-it-fail-'));
+  const port = await getFreePort();
+  const dbPath = path.join(tempDir, 'test.sqlite');
+  const env: NodeJS.ProcessEnv = {
+    ...process.env,
+    CONTACTBRIDGE_DB_PATH: dbPath,
+    CONTACTBRIDGE_DEMO_DATA_DIR: options.demoDataDir || demoDataDir,
+    CONTACTBRIDGE_DISABLE_FRONTEND: '1',
+    NODE_ENV: options.nodeEnv || 'test',
+    PORT: String(port),
+    ...options.envOverrides
+  };
+  if (options.appMode !== undefined) {
+    env.APP_MODE = options.appMode;
+  }
+
+  const serverProcess = spawn(
+    process.execPath,
+    ['--import', 'tsx', path.join(repoRoot, 'server.ts')],
+    {
+      cwd: repoRoot,
+      env,
+      stdio: ['ignore', 'pipe', 'pipe']
+    }
+  );
+
+  let output = '';
+  serverProcess.stdout.on('data', (chunk) => {
+    output += chunk.toString();
+  });
+  serverProcess.stderr.on('data', (chunk) => {
+    output += chunk.toString();
+  });
+
+  const exitCode = await Promise.race([
+    new Promise<number | null>((resolve) => serverProcess.once('exit', (code) => resolve(code))),
+    delay(5_000).then(() => null)
+  ]);
+
+  if (exitCode === null) {
+    serverProcess.kill('SIGTERM');
+    await new Promise<void>((resolve) => serverProcess.once('exit', () => resolve()));
+    await fs.rm(tempDir, { recursive: true, force: true });
+    throw new Error('Expected server startup to fail, but it stayed running.');
+  }
+
+  await fs.rm(tempDir, { recursive: true, force: true });
+  return { exitCode, output };
 };
 
 const stopServer = async ({ process, tempDir }: ServerHandle) => {
@@ -179,6 +245,18 @@ const getJson = async <T>(baseUrl: string, pathname: string): Promise<T> => {
   const response = await fetch(`${baseUrl}${pathname}`);
   assert.equal(response.ok, true, `Expected ${pathname} to succeed`);
   return response.json() as Promise<T>;
+};
+
+const getText = async (
+  baseUrl: string,
+  pathname: string,
+  options: { headers?: Record<string, string> } = {}
+) => {
+  const response = await fetch(`${baseUrl}${pathname}`, {
+    ...(options.headers ? { headers: options.headers } : {})
+  });
+  assert.equal(response.ok, true, `Expected ${pathname} to succeed`);
+  return response.text();
 };
 
 const deleteJson = async <T>(baseUrl: string, pathname: string): Promise<T> => {
@@ -716,4 +794,410 @@ test('erases all stored demo data', async (t) => {
 
   const jobs = await getJson<Array<{ id: string }>>(server.baseUrl, '/api/dashboard/sync-jobs');
   assert.equal(jobs.length, 0);
+});
+
+test('runtime mode defaults follow NODE_ENV and health exposes appMode only', async (t) => {
+  const testModeServer = await startServer({ envOverrides: { APP_MODE: undefined }, nodeEnv: 'test' });
+  t.after(() => stopServer(testModeServer));
+  const testHealth = await getJson<Record<string, unknown>>(testModeServer.baseUrl, '/api/health');
+  assert.deepEqual(Object.keys(testHealth).sort(), ['appMode', 'status']);
+  assert.equal(testHealth.appMode, 'test');
+
+  const localModeServer = await startServer({ envOverrides: { APP_MODE: undefined }, nodeEnv: 'development' });
+  t.after(() => stopServer(localModeServer));
+  const localHealth = await getJson<Record<string, unknown>>(localModeServer.baseUrl, '/api/health');
+  assert.equal(localHealth.appMode, 'local');
+
+  const hostedModeServer = await startServer({
+    envOverrides: {
+      APP_MODE: undefined,
+      CONTACTBRIDGE_CORS_ORIGINS: 'https://ui.example.test',
+      CONTACTBRIDGE_SECRET_KEY: 'hosted-test-secret'
+    },
+    healthCheckOrigin: 'https://ui.example.test',
+    nodeEnv: 'production'
+  });
+  t.after(() => stopServer(hostedModeServer));
+  const hostedHealthResponse = await fetch(`${hostedModeServer.baseUrl}/api/health`, {
+    headers: { Origin: 'https://ui.example.test' }
+  });
+  assert.equal(hostedHealthResponse.ok, true);
+  const hostedHealth = await hostedHealthResponse.json() as Record<string, unknown>;
+  assert.equal(hostedHealth.appMode, 'hosted');
+});
+
+test('invalid APP_MODE fails startup', async () => {
+  const failure = await startServerExpectFailure({ appMode: 'broken-mode' });
+  assert.notEqual(failure.exitCode, 0);
+  assert.match(failure.output, /Invalid APP_MODE/);
+});
+
+test('hosted startup fails without CONTACTBRIDGE_SECRET_KEY', async () => {
+  const failure = await startServerExpectFailure({
+    appMode: 'hosted',
+    nodeEnv: 'production',
+    envOverrides: {
+      CONTACTBRIDGE_SECRET_KEY: '',
+      CONTACTBRIDGE_CORS_ORIGINS: 'https://ui.example.test'
+    }
+  });
+  assert.notEqual(failure.exitCode, 0);
+  assert.match(failure.output, /CONTACTBRIDGE_SECRET_KEY is required at startup/);
+});
+
+test('database erase route requires explicit confirmation and stays blocked in hosted mode', async (t) => {
+  const localServer = await startServer();
+  t.after(() => stopServer(localServer));
+
+  const missingHeaderResponse = await fetch(`${localServer.baseUrl}/api/database`, { method: 'DELETE' });
+  assert.equal(missingHeaderResponse.status, 400);
+
+  const allowedResponse = await fetch(`${localServer.baseUrl}/api/database`, {
+    method: 'DELETE',
+    headers: { 'X-ContactBridge-Confirm-Reset': 'erase-local-data' }
+  });
+  assert.equal(allowedResponse.status, 200);
+
+  const hostedServer = await startServer({
+    appMode: 'hosted',
+    nodeEnv: 'production',
+    envOverrides: {
+      CONTACTBRIDGE_CORS_ORIGINS: 'https://ui.example.test',
+      CONTACTBRIDGE_SECRET_KEY: 'hosted-test-secret'
+    },
+    healthCheckOrigin: 'https://ui.example.test'
+  });
+  t.after(() => stopServer(hostedServer));
+
+  const hostedDeleteResponse = await fetch(`${hostedServer.baseUrl}/api/database`, {
+    method: 'DELETE',
+    headers: {
+      Origin: 'https://ui.example.test',
+      'X-ContactBridge-Confirm-Reset': 'erase-local-data'
+    }
+  });
+  assert.equal(hostedDeleteResponse.status, 403);
+});
+
+test('cors enforces hosted allowlist, rejects hosted no-origin, and allows loopback in local mode', async (t) => {
+  const hostedServer = await startServer({
+    appMode: 'hosted',
+    nodeEnv: 'production',
+    envOverrides: {
+      CONTACTBRIDGE_CORS_ORIGINS: 'https://allowed.example.test',
+      CONTACTBRIDGE_SECRET_KEY: 'hosted-test-secret'
+    },
+    healthCheckOrigin: 'https://allowed.example.test'
+  });
+  t.after(() => stopServer(hostedServer));
+
+  const allowedHostedResponse = await fetch(`${hostedServer.baseUrl}/api/health`, {
+    headers: { Origin: 'https://allowed.example.test' }
+  });
+  assert.equal(allowedHostedResponse.ok, true);
+
+  const rejectedHostedResponse = await fetch(`${hostedServer.baseUrl}/api/health`, {
+    headers: { Origin: 'https://rejected.example.test' }
+  });
+  assert.equal(rejectedHostedResponse.ok, false);
+  assert.ok(rejectedHostedResponse.status >= 400);
+
+  const noOriginHostedResponse = await fetch(`${hostedServer.baseUrl}/api/health`);
+  assert.equal(noOriginHostedResponse.ok, false);
+  assert.ok(noOriginHostedResponse.status >= 400);
+
+  const localServer = await startServer({ appMode: 'local', nodeEnv: 'development' });
+  t.after(() => stopServer(localServer));
+  const loopbackLocalResponse = await fetch(`${localServer.baseUrl}/api/health`, {
+    headers: { Origin: 'http://localhost:5173' }
+  });
+  assert.equal(loopbackLocalResponse.ok, true);
+});
+
+test('x sync migrates legacy auth_data into encrypted secrets and reuses encrypted credentials', async (t) => {
+  const server = await startServer();
+  t.after(() => stopServer(server));
+
+  const sourceAccount = await postJson<{ id: string }>(server.baseUrl, '/api/source-accounts', {
+    sourceType: 'x',
+    accountIdentifier: 'X OAuth',
+    displayName: 'X (Twitter)',
+    authStatus: 'pending'
+  });
+
+  const sqlite = new Database(server.dbPath);
+  t.after(() => sqlite.close());
+  sqlite.prepare('UPDATE source_accounts SET auth_data = ? WHERE id = ?').run(
+    JSON.stringify({ accessToken: 'stored-demo-token', refreshToken: 'stored-refresh-token' }),
+    sourceAccount.id
+  );
+
+  const firstSync = await postSync<{ success: boolean; count: number }>(server.baseUrl, '/api/sync/x', {
+    sourceAccountId: sourceAccount.id
+  });
+  assert.equal(firstSync.success, true);
+  assert.equal(firstSync.count, 2);
+
+  const secretRow = sqlite.prepare(`
+    SELECT encrypted_payload AS encryptedPayload
+    FROM source_account_secrets
+    WHERE source_account_id = ?
+  `).get(sourceAccount.id) as { encryptedPayload: string } | undefined;
+  assert.ok(secretRow);
+  assert.ok(secretRow.encryptedPayload.length > 20);
+  assert.equal(secretRow.encryptedPayload.includes('stored-demo-token'), false);
+
+  const authDataRow = sqlite.prepare(`
+    SELECT auth_data AS authData
+    FROM source_accounts
+    WHERE id = ?
+  `).get(sourceAccount.id) as { authData: string | null } | undefined;
+  assert.equal(authDataRow?.authData, null);
+
+  const secondSync = await postSync<{ success: boolean; count: number }>(server.baseUrl, '/api/sync/x', {
+    sourceAccountId: sourceAccount.id
+  });
+  assert.equal(secondSync.success, true);
+  assert.equal(secondSync.count, 2);
+});
+
+test('disconnect removes stored encrypted source account secrets', async (t) => {
+  const server = await startServer();
+  t.after(() => stopServer(server));
+
+  const sourceAccount = await postJson<{ id: string }>(server.baseUrl, '/api/source-accounts', {
+    sourceType: 'x',
+    accountIdentifier: 'X OAuth',
+    displayName: 'X (Twitter)',
+    authStatus: 'pending'
+  });
+
+  const sqlite = new Database(server.dbPath);
+  t.after(() => sqlite.close());
+  sqlite.prepare('UPDATE source_accounts SET auth_data = ? WHERE id = ?').run(
+    JSON.stringify({ accessToken: 'stored-demo-token' }),
+    sourceAccount.id
+  );
+
+  await postSync(server.baseUrl, '/api/sync/x', { sourceAccountId: sourceAccount.id });
+
+  const beforeDeleteSecrets = sqlite.prepare(`
+    SELECT COUNT(*) AS count FROM source_account_secrets WHERE source_account_id = ?
+  `).get(sourceAccount.id) as { count: number };
+  assert.equal(beforeDeleteSecrets.count, 1);
+
+  await deleteJson(server.baseUrl, `/api/source-accounts/${sourceAccount.id}`);
+
+  const afterDeleteSecrets = sqlite.prepare(`
+    SELECT COUNT(*) AS count FROM source_account_secrets WHERE source_account_id = ?
+  `).get(sourceAccount.id) as { count: number };
+  assert.equal(afterDeleteSecrets.count, 0);
+});
+
+test('same-source same handle but different source profile id creates review evidence only', async (t) => {
+  const overrideDemoDataRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'contactbridge-demo-'));
+  const overrideDemoDataDir = path.join(overrideDemoDataRoot, 'fixtures');
+  await fs.cp(demoDataDir, overrideDemoDataDir, { recursive: true });
+  t.after(async () => {
+    await fs.rm(overrideDemoDataRoot, { recursive: true, force: true });
+  });
+
+  const githubFixturePath = path.join(overrideDemoDataDir, 'github.json');
+  await fs.writeFile(githubFixturePath, JSON.stringify({
+    followersResponse: [{ id: 111, login: 'shared-handle', avatar_url: '', url: 'https://api.github.com/users/shared-handle' }],
+    followingResponse: []
+  }, null, 2));
+
+  const server = await startServer({ demoDataDir: overrideDemoDataDir });
+  t.after(() => stopServer(server));
+
+  const firstAccount = await postJson<{ id: string }>(server.baseUrl, '/api/source-accounts', {
+    sourceType: 'github',
+    accountIdentifier: 'github-demo-account-1',
+    displayName: 'github demo 1',
+    authStatus: 'pending'
+  });
+  await postSync(server.baseUrl, '/api/sync/github', { sourceAccountId: firstAccount.id, token: 'demo-token' });
+
+  await fs.writeFile(githubFixturePath, JSON.stringify({
+    followersResponse: [{ id: 222, login: 'shared-handle', avatar_url: '', url: 'https://api.github.com/users/shared-handle' }],
+    followingResponse: []
+  }, null, 2));
+
+  const secondAccount = await postJson<{ id: string }>(server.baseUrl, '/api/source-accounts', {
+    sourceType: 'github',
+    accountIdentifier: 'github-demo-account-2',
+    displayName: 'github demo 2',
+    authStatus: 'pending'
+  });
+  await postSync(server.baseUrl, '/api/sync/github', { sourceAccountId: secondAccount.id, token: 'demo-token' });
+
+  const candidates = await getJson<Array<{ id: string }>>(server.baseUrl, '/api/candidates');
+  assert.equal(candidates.length, 2);
+
+  const sqlite = new Database(server.dbPath);
+  t.after(() => sqlite.close());
+  const evidenceRows = sqlite.prepare(`
+    SELECT evidence_type AS evidenceType
+    FROM candidate_match_evidence
+  `).all() as Array<{ evidenceType: string }>;
+  assert.ok(evidenceRows.some((row) => row.evidenceType === 'same_source_handle_profile_id_mismatch_review'));
+
+  const dedupeCounts = sqlite.prepare(`
+    SELECT
+      COUNT(*) AS totalCount,
+      COUNT(DISTINCT contact_candidate_id || ':' || social_profile_id) AS distinctCount
+    FROM contact_candidate_profiles
+  `).get() as { distinctCount: number; totalCount: number };
+  assert.equal(dedupeCounts.totalCount, dedupeCounts.distinctCount);
+});
+
+test('cross-source same handle creates review evidence only', async (t) => {
+  const overrideDemoDataRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'contactbridge-demo-'));
+  const overrideDemoDataDir = path.join(overrideDemoDataRoot, 'fixtures');
+  await fs.cp(demoDataDir, overrideDemoDataDir, { recursive: true });
+  t.after(async () => {
+    await fs.rm(overrideDemoDataRoot, { recursive: true, force: true });
+  });
+
+  await fs.writeFile(path.join(overrideDemoDataDir, 'github.json'), JSON.stringify({
+    followersResponse: [{ id: 333, login: 'cross-handle', avatar_url: '', url: 'https://api.github.com/users/cross-handle' }],
+    followingResponse: []
+  }, null, 2));
+  await fs.writeFile(path.join(overrideDemoDataDir, 'x.json'), JSON.stringify({
+    followersResponse: { data: [{ id: 'x-444', username: 'cross-handle', name: 'Cross Handle', description: '', profile_image_url: '' }] },
+    followingResponse: { data: [] }
+  }, null, 2));
+
+  const server = await startServer({ demoDataDir: overrideDemoDataDir });
+  t.after(() => stopServer(server));
+
+  const githubAccount = await postJson<{ id: string }>(server.baseUrl, '/api/source-accounts', {
+    sourceType: 'github',
+    accountIdentifier: 'github-demo-account',
+    displayName: 'github demo',
+    authStatus: 'pending'
+  });
+  await postSync(server.baseUrl, '/api/sync/github', { sourceAccountId: githubAccount.id, token: 'demo-token' });
+
+  const xAccount = await postJson<{ id: string }>(server.baseUrl, '/api/source-accounts', {
+    sourceType: 'x',
+    accountIdentifier: 'x-demo-account',
+    displayName: 'x demo',
+    authStatus: 'pending'
+  });
+  await postSync(server.baseUrl, '/api/sync/x', { sourceAccountId: xAccount.id, accessToken: 'demo-token' });
+
+  const candidates = await getJson<Array<{ id: string }>>(server.baseUrl, '/api/candidates');
+  assert.equal(candidates.length, 2);
+
+  const sqlite = new Database(server.dbPath);
+  t.after(() => sqlite.close());
+  const evidenceRows = sqlite.prepare(`
+    SELECT evidence_type AS evidenceType
+    FROM candidate_match_evidence
+  `).all() as Array<{ evidenceType: string }>;
+  assert.ok(evidenceRows.some((row) => row.evidenceType === 'cross_source_handle_review'));
+});
+
+test('display-name-only matching remains weak review evidence only', async (t) => {
+  const server = await startServer();
+  t.after(() => stopServer(server));
+
+  await postJson(server.baseUrl, '/api/capture/manual', {
+    source: 'linkedin',
+    profileUrl: 'https://www.linkedin.com/in/same-name-one',
+    displayName: 'Same Name',
+    handle: 'same-name-one'
+  });
+  await postJson(server.baseUrl, '/api/capture/manual', {
+    source: 'x',
+    profileUrl: 'https://x.com/different-handle-two',
+    displayName: 'Same Name',
+    handle: 'different-handle-two'
+  });
+
+  const candidates = await getJson<Array<{ id: string }>>(server.baseUrl, '/api/candidates');
+  assert.equal(candidates.length, 2);
+
+  const sqlite = new Database(server.dbPath);
+  t.after(() => sqlite.close());
+  const evidenceRows = sqlite.prepare(`
+    SELECT evidence_type AS evidenceType, score
+    FROM candidate_match_evidence
+  `).all() as Array<{ evidenceType: string; score: number }>;
+  const displayNameEvidence = evidenceRows.find((row) => row.evidenceType === 'display_name_only_review');
+  assert.ok(displayNameEvidence);
+  assert.equal(displayNameEvidence.score, 20);
+});
+
+test('backend exports include only approved candidates and escape CSV and VCF values safely', async (t) => {
+  const server = await startServer();
+  t.after(() => stopServer(server));
+
+  const pendingCandidate = await postJson<{ id: string }>(server.baseUrl, '/api/capture/manual', {
+    source: 'linkedin',
+    profileUrl: 'https://www.linkedin.com/in/pending-person',
+    displayName: 'Pending Person',
+    handle: 'pending-person'
+  });
+  assert.ok(pendingCandidate.id);
+
+  const approvedCandidate = await postJson<{ id: string }>(server.baseUrl, '/api/capture/manual', {
+    source: 'x',
+    profileUrl: 'https://x.com/alice;demo',
+    displayName: 'Alice "Ace", Demo\nLine',
+    handle: 'alice-demo'
+  });
+  await patchJson(server.baseUrl, `/api/candidates/${approvedCandidate.id}`, {
+    status: 'approved',
+    notes: 'Line one,\nLine two; with "quotes"'
+  });
+
+  const exportJson = JSON.parse(await getText(server.baseUrl, '/api/exports/contacts.json')) as Array<{ id: string }>;
+  assert.deepEqual(exportJson.map((candidate) => candidate.id), [approvedCandidate.id]);
+
+  const csvExport = await getText(server.baseUrl, '/api/exports/contacts.csv');
+  assert.equal(csvExport.includes('Pending Person'), false);
+  assert.match(csvExport, /"Alice ""Ace"", Demo\nLine"/);
+  assert.match(csvExport, /"Line one,\nLine two; with ""quotes"""/);
+
+  const vcfExport = await getText(server.baseUrl, '/api/exports/contacts.vcf');
+  assert.equal(vcfExport.includes('Pending Person'), false);
+  assert.match(vcfExport, /FN:Alice "Ace"\\, Demo\\nLine/);
+  assert.match(vcfExport, /NOTE:Line one\\,\\nLine two\\; with "quotes"/);
+  assert.match(vcfExport, /URL:https:\/\/x\.com\/alice\\;demo/);
+});
+
+test('extension health endpoint returns stable capabilities without secrets', async (t) => {
+  const server = await startServer();
+  t.after(() => stopServer(server));
+
+  const extensionHealth = await getJson<Record<string, unknown>>(server.baseUrl, '/api/extension/health');
+  assert.equal(extensionHealth.appName, 'ContactBridge');
+  assert.equal(extensionHealth.appMode, 'test');
+  assert.ok(Array.isArray(extensionHealth.capabilities));
+  assert.ok((extensionHealth.capabilities as string[]).includes('capture.manual.v1'));
+  assert.equal('CONTACTBRIDGE_SECRET_KEY' in extensionHealth, false);
+});
+
+test('startup creates required runtime indexes and unique constraints', async (t) => {
+  const server = await startServer();
+  t.after(() => stopServer(server));
+
+  const sqlite = new Database(server.dbPath);
+  t.after(() => sqlite.close());
+  const indexes = sqlite.prepare(`
+    SELECT name FROM sqlite_master WHERE type = 'index'
+  `).all() as Array<{ name: string }>;
+  const indexNames = new Set(indexes.map((entry) => entry.name));
+
+  assert.ok(indexNames.has('idx_social_profiles_source_identity'));
+  assert.ok(indexNames.has('idx_contact_candidate_profiles_unique_pair'));
+  assert.ok(indexNames.has('idx_contact_candidates_status'));
+  assert.ok(indexNames.has('idx_social_profiles_handle'));
+  assert.ok(indexNames.has('idx_relationship_edges_source_account_id'));
+  assert.ok(indexNames.has('idx_relationship_edges_social_profile_id'));
+  assert.ok(indexNames.has('idx_candidate_match_evidence_candidate_id'));
+  assert.ok(indexNames.has('idx_candidate_match_evidence_profile_id'));
 });

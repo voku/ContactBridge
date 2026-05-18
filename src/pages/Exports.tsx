@@ -4,78 +4,35 @@ import { Download } from 'lucide-react';
 import { toast } from 'sonner';
 import { apiUrl } from '@/lib/api';
 
-const getProfileUrl = (p: any) => {
-  if (p.profileUrl) return p.profileUrl;
-  try {
-    const raw = p.rawPublicPayloadJson ? JSON.parse(p.rawPublicPayloadJson) : {};
-    if (p.sourceType === 'mastodon' && raw.url) return raw.url;
-    if (p.sourceType === 'github' && raw.html_url) return raw.html_url;
-  } catch (e) {}
-
-  switch (p.sourceType?.toLowerCase()) {
-    case 'github': return `https://github.com/${p.handle}`;
-    case 'x': case 'twitter': return `https://x.com/${p.handle}`;
-    case 'bluesky': return `https://bsky.app/profile/${p.handle}`;
-    case 'linkedin': return `https://linkedin.com/in/${p.handle}`;
-    case 'xing': return `https://www.xing.com/profile/${p.handle}`;
-    default: return '#';
-  }
-};
-
 export default function Exports() {
   const handleExport = async (format: string) => {
     try {
-      const res = await fetch(apiUrl('/api/candidates'));
-      const data = await res.json();
-      const approved = data.filter((c: any) => c.status === 'approved');
-      
-      let content = '';
-      let filename = '';
-      let mimeType = '';
+      const exportPathByFormat: Record<string, string> = {
+        csv: '/api/exports/contacts.csv',
+        json: '/api/exports/contacts.json',
+        vcf: '/api/exports/contacts.vcf'
+      };
 
-      if (format === 'csv') {
-        content = ['Name,Source,Handle'].join(',');
-        content += '\n' + approved.map((c: any) => {
-          const profile = c.profiles[0];
-          return `"${c.canonicalName || ''}","${profile?.sourceType || ''}","${profile?.handle || ''}"`;
-        }).join('\n');
-        filename = 'contacts.csv';
-        mimeType = 'text/csv';
-      } else if (format === 'json') {
-        content = JSON.stringify(approved, null, 2);
-        filename = 'contacts.json';
-        mimeType = 'application/json';
-      } else if (format === 'vcf') {
-        content = approved.map((c: any) => {
-          let vcard = 'BEGIN:VCARD\r\nVERSION:3.0\r\n';
-          vcard += `FN:${c.canonicalName || 'Unknown'}\r\n`;
-          vcard += `N:${c.canonicalName || 'Unknown'};;;;\r\n`;
-          c.profiles.forEach((p: any) => {
-            const url = getProfileUrl(p);
-            if (url && url !== '#') {
-              vcard += `URL;type=${p.sourceType}:${url}\r\n`;
-            }
-            if (p.bio && vcard.indexOf('NOTE:') === -1) {
-              const safeBio = p.bio.replace(/\n|\r/g, ' ').replace(/;/g, '\\;');
-              vcard += `NOTE:${safeBio}\r\n`;
-            }
-          });
-          vcard += 'END:VCARD\r\n';
-          return vcard;
-        }).join('');
-        filename = 'contacts.vcf';
-        mimeType = 'text/vcard';
+      const exportPath = exportPathByFormat[format];
+      if (!exportPath) {
+        throw new Error('Unsupported export format');
       }
 
-      const blob = new Blob([content], { type: mimeType });
+      const res = await fetch(apiUrl(exportPath));
+      if (!res.ok) {
+        throw new Error('Export request failed');
+      }
+
+      const blob = await res.blob();
+      const filename = `contacts.${format}`;
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url;
       a.download = filename;
       a.click();
       URL.revokeObjectURL(url);
-      
-      toast.success(`Exported ${approved.length} contacts as ${format.toUpperCase()}`);
+
+      toast.success(`Downloaded ${format.toUpperCase()} export`);
     } catch (e) {
       toast.error('Failed to export data');
     }
