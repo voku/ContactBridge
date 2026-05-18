@@ -355,8 +355,13 @@ const getProfileSnapshots = (sqlite: any, sourceType: string, sourceAccountId: s
     profileUrl: string | null;
   }>;
 
-  return profiles.map(({ id: _id, ...profile }) => ({
-    ...profile,
+  return profiles.map((profile) => ({
+    sourceType: profile.sourceType,
+    sourceProfileId: profile.sourceProfileId,
+    handle: profile.handle,
+    displayName: profile.displayName,
+    bio: profile.bio,
+    profileUrl: profile.profileUrl,
     relationTypes: (sqlite.prepare(`
       SELECT relation_type AS relationType
       FROM relationship_edges
