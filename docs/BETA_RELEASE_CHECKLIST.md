@@ -29,7 +29,7 @@
 2. Enable **Developer mode**
 3. Choose **Load unpacked**
 4. Select the repository `extension/` directory
-5. Open the extension side panel
+5. Click the ContactBridge extension button (pin it first if it only appears in the browser extensions menu) to open the side panel
 6. Set the hub URL to `http://localhost:3000`
 7. Capture one supported public profile
 8. Confirm the captured profile appears in the review queue

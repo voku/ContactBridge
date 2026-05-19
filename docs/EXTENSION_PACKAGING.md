@@ -8,7 +8,7 @@ For the local-first beta, load the extension unpacked from `extension/`:
 2. Enable **Developer mode**
 3. Choose **Load unpacked**
 4. Select the repository `extension/` directory
-5. Open the side panel and set the local hub URL
+5. Click the ContactBridge extension button (pin it first if it only appears in the browser extensions menu) to open the side panel, then set the local hub URL
 
 ## Optional host permissions
 

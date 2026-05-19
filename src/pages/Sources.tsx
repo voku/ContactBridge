@@ -100,20 +100,20 @@ const ExtensionSetupDialog = ({ triggerLabel = 'Extension Setup' }: { triggerLab
     <DialogTrigger render={<Button variant="secondary" />}>
       {triggerLabel}
     </DialogTrigger>
-    <DialogContent>
-      <DialogHeader>
-        <DialogTitle>Extension Setup</DialogTitle>
-        <DialogDescription>
-          To capture profiles manually from supported networks (LinkedIn, X, Bluesky, and XING), follow these instructions:
-        </DialogDescription>
-      </DialogHeader>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Extension Setup</DialogTitle>
+            <DialogDescription>
+              To capture individual profiles from supported networks, or import the visible people on supported LinkedIn overview pages, follow these instructions:
+            </DialogDescription>
+          </DialogHeader>
       <div className="space-y-4 py-4 text-sm text-gray-700">
         <ol className="list-decimal pl-5 space-y-3">
           <li>Download the <code>extension</code> folder included in this source code.</li>
           <li>Open Chrome and navigate to <strong>chrome://extensions</strong></li>
           <li>Enable <strong>Developer mode</strong> in the top right.</li>
           <li>Click <strong>Load unpacked</strong> and select the <code>extension</code> folder.</li>
-          <li>Click the extension icon in Chrome to open the Side Panel.</li>
+          <li>Click the ContactBridge extension button in Chrome (pin it first if it is only visible in the extensions menu) to open the Side Panel.</li>
           <li>Enter the following local hub URL when prompted:</li>
         </ol>
         <div className="bg-gray-100 p-3 rounded-md flex items-center justify-between">
@@ -687,7 +687,7 @@ export default function Sources() {
             <div>
               <CardTitle className="text-lg">LinkedIn</CardTitle>
               <CardDescription className="mt-2 text-sm max-w-md">
-                Manual capture via the browser extension is the primary path. Official API sync is restricted to approved LinkedIn partner access.
+                Explicit browser-extension capture is the primary path, including visible-profile import from supported LinkedIn overview pages. Official API sync is restricted to approved LinkedIn partner access.
               </CardDescription>
             </div>
             
