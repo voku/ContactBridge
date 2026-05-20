@@ -9,6 +9,10 @@
     "storage",
     "scripting"
   ],
+  "host_permissions": [
+    "http://localhost/*",
+    "http://127.0.0.1/*"
+  ],
   "optional_host_permissions": [
     "*://*.linkedin.com/*",
     "*://*.x.com/*",

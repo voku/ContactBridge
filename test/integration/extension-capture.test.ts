@@ -1,5 +1,7 @@
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 import test from 'node:test';
+import { fileURLToPath } from 'node:url';
 
 await import(new URL('../../extension/shared.js', import.meta.url).href);
 
@@ -94,6 +96,18 @@ test('getProfileContext only treats real profile URLs as capturable', () => {
   assert.equal(extensionApi.getProfileContext('https://bsky.app/profile/jane.test').source, 'bluesky');
   assert.equal(extensionApi.getProfileContext('https://www.xing.com/profile/Jane_Demo').source, 'xing');
   assert.equal(extensionApi.getProfileContext('not-a-url').isSupported, false);
+});
+
+test('manifest grants loopback host access for hub validation and capture posts', () => {
+  const manifestPath = fileURLToPath(new URL('../../extension/manifest.json', import.meta.url));
+  const manifest = JSON.parse(readFileSync(manifestPath, 'utf8')) as {
+    host_permissions?: string[];
+  };
+
+  assert.deepEqual(manifest.host_permissions, [
+    'http://localhost/*',
+    'http://127.0.0.1/*'
+  ]);
 });
 
 test('extractProfileFromDocument reuses shared selectors for supported networks', () => {
