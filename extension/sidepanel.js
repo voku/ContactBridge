@@ -1,51 +1,137 @@
 document.addEventListener('DOMContentLoaded', () => {
   const extensionApi = globalThis.ContactBridgeExtension;
+  const configForm = document.getElementById('configForm');
   const apiUrlInput = document.getElementById('apiUrl');
-  const saveConfigBtn = document.getElementById('saveConfigBtn');
+  const apiUrlError = document.getElementById('apiUrlError');
+  const apiUrlErrorText = document.getElementById('apiUrlErrorText');
   const captureBtn = document.getElementById('captureBtn');
   const captureSection = document.getElementById('captureSection');
   const profileDataDiv = document.getElementById('profileData');
   const statusDiv = document.getElementById('status');
+  const supportsUserInvalid = globalThis.CSS?.supports?.('selector(:user-invalid)') ?? false;
+  const defaultApiUrlErrorMessage = 'Enter a valid ContactBridge hub URL.';
 
   let currentProfile = null;
   let currentProfiles = [];
+  let statusResetTimer = null;
+
+  captureSection.inert = true;
+
+  function clearStatus() {
+    if (statusResetTimer !== null) {
+      clearTimeout(statusResetTimer);
+      statusResetTimer = null;
+    }
+    statusDiv.hidden = true;
+    statusDiv.removeAttribute('data-variant');
+    statusDiv.removeAttribute('role');
+    statusDiv.setAttribute('aria-live', 'polite');
+    statusDiv.textContent = '';
+  }
+
+  function queueStatusReset(delay = 2000) {
+    if (statusResetTimer !== null) {
+      clearTimeout(statusResetTimer);
+    }
+    statusResetTimer = globalThis.setTimeout(() => {
+      clearStatus();
+    }, delay);
+  }
+
+  function syncApiUrlFieldState(message = '') {
+    const hasCustomError = apiUrlInput.validity.customError;
+    const isUserInvalid = supportsUserInvalid && apiUrlInput.matches(':user-invalid');
+    const isInvalid = hasCustomError || isUserInvalid;
+    const nextMessage = message || (isInvalid ? apiUrlInput.validationMessage || defaultApiUrlErrorMessage : defaultApiUrlErrorMessage);
+
+    apiUrlErrorText.textContent = nextMessage;
+    apiUrlError.hidden = !isInvalid;
+
+    if (isInvalid) {
+      apiUrlInput.setAttribute('aria-invalid', 'true');
+    } else {
+      apiUrlInput.removeAttribute('aria-invalid');
+    }
+  }
+
+  function setCaptureBusy(isBusy) {
+    captureSection.setAttribute('aria-busy', String(isBusy));
+  }
 
   chrome.storage.sync.get(['apiUrl'], (result) => {
     if (result.apiUrl) {
       const hubUrl = extensionApi.isAllowedHubUrl(result.apiUrl);
       if (hubUrl.ok) {
         apiUrlInput.value = hubUrl.url;
+        apiUrlInput.setCustomValidity('');
+        syncApiUrlFieldState();
         enableCapture();
       } else {
         chrome.storage.sync.remove(['apiUrl']);
-        showStatus(hubUrl.error, true);
+        apiUrlInput.setCustomValidity(hubUrl.error);
+        syncApiUrlFieldState(hubUrl.error);
       }
     }
   });
 
-  saveConfigBtn.addEventListener('click', async () => {
+  configForm.addEventListener('submit', async (event) => {
+    event.preventDefault();
+    clearStatus();
+    apiUrlInput.setCustomValidity('');
+    syncApiUrlFieldState();
+
+    if (!apiUrlInput.reportValidity()) {
+      syncApiUrlFieldState(apiUrlInput.validationMessage);
+      return;
+    }
+
     try {
       const hubUrl = await extensionApi.validateHubHealth(apiUrlInput.value);
       if (!hubUrl.ok) {
-        showStatus(hubUrl.error, true);
+        apiUrlInput.setCustomValidity(hubUrl.error);
+        syncApiUrlFieldState(hubUrl.error);
+        apiUrlInput.reportValidity();
+        apiUrlInput.focus();
         return;
       }
 
       chrome.storage.sync.set({ apiUrl: hubUrl.url }, () => {
         apiUrlInput.value = hubUrl.url;
+        apiUrlInput.setCustomValidity('');
+        syncApiUrlFieldState();
         enableCapture();
         showStatus('Configuration saved!', false);
-        setTimeout(() => { statusDiv.style.display = 'none'; }, 2000);
+        queueStatusReset();
       });
     } catch (error) {
       console.error('Hub validation error:', error);
-      showStatus('Hub validation failed unexpectedly.', true);
+      apiUrlInput.setCustomValidity('Hub validation failed unexpectedly.');
+      syncApiUrlFieldState('Hub validation failed unexpectedly.');
+      apiUrlInput.reportValidity();
+      apiUrlInput.focus();
     }
   });
 
+  apiUrlInput.addEventListener('blur', () => {
+    syncApiUrlFieldState();
+  });
+
+  apiUrlInput.addEventListener('input', () => {
+    if (apiUrlInput.validity.customError) {
+      apiUrlInput.setCustomValidity('');
+    }
+    syncApiUrlFieldState();
+  });
+
+  apiUrlInput.addEventListener('invalid', () => {
+    syncApiUrlFieldState(apiUrlInput.validationMessage);
+  });
+
   function enableCapture() {
-    captureSection.style.opacity = '1';
-    captureSection.style.pointerEvents = 'auto';
+    captureSection.classList.remove('capture-disabled');
+    captureSection.removeAttribute('aria-disabled');
+    captureSection.inert = false;
+    setCaptureBusy(false);
     checkCurrentTab();
   }
 
@@ -122,9 +208,11 @@ document.addEventListener('DOMContentLoaded', () => {
 
   function extractData(tabId) {
     resetCurrentCapture();
+    setCaptureBusy(true);
     renderProfileMessage('Reading profile data...');
     setCaptureButton('Save this profile', true);
     chrome.runtime.sendMessage({ action: 'capture_profile', tabId }, (response) => {
+      setCaptureBusy(false);
       if (chrome.runtime.lastError) {
         renderProfileMessage(`Cannot access this page: ${chrome.runtime.lastError.message}`);
         setCaptureButton('Save this profile', true);
@@ -145,9 +233,11 @@ document.addEventListener('DOMContentLoaded', () => {
 
   function extractBatchData(tabId) {
     resetCurrentCapture();
+    setCaptureBusy(true);
     renderProfileMessage('Reading visible profiles...');
     setCaptureButton('Import visible profiles', true);
     chrome.runtime.sendMessage({ action: 'capture_profiles', tabId }, (response) => {
+      setCaptureBusy(false);
       if (chrome.runtime.lastError) {
         renderProfileMessage(`Cannot access this page: ${chrome.runtime.lastError.message}`);
         setCaptureButton('Import visible profiles', true);
@@ -182,6 +272,7 @@ document.addEventListener('DOMContentLoaded', () => {
         capturedAt: new Date().toISOString()
       };
 
+      setCaptureBusy(true);
       setCaptureButton('Saving...', true);
 
       fetch(`${apiUrl.replace(/(\/)$/, '')}/api/capture/manual`, {
@@ -204,12 +295,14 @@ document.addEventListener('DOMContentLoaded', () => {
           ? 'Captured successfully. Review it in ContactBridge before approving.'
           : 'Captured successfully!';
         showStatus(message, false);
+        queueStatusReset();
         setTimeout(() => {
+          setCaptureBusy(false);
           setCaptureButton('Save this profile', false, saveProfile);
-          statusDiv.style.display = 'none';
         }, 2000);
       })
       .catch(err => {
+        setCaptureBusy(false);
         showStatus('Failed: ' + err.message, true);
         setCaptureButton('Save this profile', false, saveProfile);
       });
@@ -228,6 +321,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
       const apiUrl = hubUrl.url;
       const capturedAt = new Date().toISOString();
+      setCaptureBusy(true);
       setCaptureButton('Importing...', true);
 
       fetch(`${apiUrl.replace(/(\/)$/, '')}/api/capture/manual/batch`, {
@@ -255,12 +349,14 @@ document.addEventListener('DOMContentLoaded', () => {
           ? 'Imported 1 visible profile. Review it in ContactBridge before approving.'
           : `Imported ${data.successCount} visible profiles. Review them in ContactBridge before approving.`;
         showStatus(message, false);
+        queueStatusReset(2500);
         setTimeout(() => {
+          setCaptureBusy(false);
           setCaptureButton('Import visible profiles', false, saveProfiles);
-          statusDiv.style.display = 'none';
         }, 2500);
       })
       .catch(err => {
+        setCaptureBusy(false);
         showStatus('Failed: ' + err.message, true);
         setCaptureButton('Import visible profiles', false, saveProfiles);
       });
@@ -269,8 +365,10 @@ document.addEventListener('DOMContentLoaded', () => {
 
   function showStatus(msg, isError) {
     statusDiv.textContent = msg;
-    statusDiv.className = isError ? 'error' : '';
-    statusDiv.style.display = 'block';
+    statusDiv.dataset.variant = isError ? 'error' : 'success';
+    statusDiv.hidden = false;
+    statusDiv.setAttribute('role', isError ? 'alert' : 'status');
+    statusDiv.setAttribute('aria-live', isError ? 'assertive' : 'polite');
   }
 
   function appendProfileRow(label, value, options = {}) {

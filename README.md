@@ -140,6 +140,7 @@ local-first, privacy-conscious, contact review, manual capture, export workflow,
 The Chrome extension lives in `extension/` and supports manual capture from LinkedIn, X, Bluesky, and XING, plus visible LinkedIn overview-page import.
 
 - Load it unpacked for local beta use
+- Repository-scoped Modern Web Guidance skills live in `.claude/skills/modern-web-guidance/` and `.agents/skills/modern-web-guidance/` for future extension/UI work
 - The side panel validates `${hub}/api/extension/health` before saving a hub URL
 - Optional host permissions mean access is only granted to the sites you explicitly enable
 - Packaged production builds must explicitly include any non-local hub origins before distribution
