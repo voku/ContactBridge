@@ -18,6 +18,8 @@ The extension uses `optional_host_permissions` so capture access is granted only
 
 Local hubs such as `http://localhost:3000` work by default.
 
+The extension manifest includes loopback `host_permissions` for `localhost` and `127.0.0.1` so the side panel can validate the hub and post manual captures during local beta use.
+
 Non-local production hub origins must be explicitly packaged because the extension should not send captured data to arbitrary remote origins by default.
 
 ## Manual beta ZIP packaging
