@@ -14,8 +14,9 @@ document.addEventListener('DOMContentLoaded', () => {
   let currentProfile = null;
   let currentProfiles = [];
   let statusResetTimer = null;
+  let activeTabRequestId = 0;
 
-  captureSection.inert = true;
+  setCaptureSectionEnabled(false);
 
   function clearStatus() {
     if (statusResetTimer !== null) {
@@ -56,6 +57,38 @@ document.addEventListener('DOMContentLoaded', () => {
 
   function setCaptureBusy(isBusy) {
     captureSection.setAttribute('aria-busy', String(isBusy));
+  }
+
+  function setCaptureSectionEnabled(isEnabled) {
+    captureSection.classList.toggle('capture-disabled', !isEnabled);
+    captureSection.inert = !isEnabled;
+    if (isEnabled) {
+      captureSection.removeAttribute('aria-disabled');
+    } else {
+      activeTabRequestId += 1;
+      captureSection.setAttribute('aria-disabled', 'true');
+      setCaptureBusy(false);
+      resetCurrentCapture();
+      renderProfileMessage('Set a valid ContactBridge hub URL to start capturing profiles.');
+      setCaptureButton('Save this profile', true);
+    }
+  }
+
+  function startTabRequest() {
+    activeTabRequestId += 1;
+    return activeTabRequestId;
+  }
+
+  function isActiveTabRequest(requestId) {
+    return requestId === activeTabRequestId;
+  }
+
+  function refreshCurrentTab() {
+    if (captureSection.inert || document.visibilityState === 'hidden') {
+      return;
+    }
+
+    checkCurrentTab();
   }
 
   chrome.storage.sync.get(['apiUrl'], (result) => {
@@ -128,9 +161,7 @@ document.addEventListener('DOMContentLoaded', () => {
   });
 
   function enableCapture() {
-    captureSection.classList.remove('capture-disabled');
-    captureSection.removeAttribute('aria-disabled');
-    captureSection.inert = false;
+    setCaptureSectionEnabled(true);
     setCaptureBusy(false);
     checkCurrentTab();
   }
@@ -157,12 +188,23 @@ document.addEventListener('DOMContentLoaded', () => {
   }
 
   function checkCurrentTab() {
+    const requestId = startTabRequest();
+    setCaptureBusy(true);
+
     chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
-      if (!tabs[0]) return;
+      if (!isActiveTabRequest(requestId)) {
+        return;
+      }
+
+      if (!tabs[0]) {
+        setCaptureBusy(false);
+        return;
+      }
       
       const tab = tabs[0];
       const url = tab.url || '';
       if (typeof tab.id !== 'number') {
+        setCaptureBusy(false);
         resetCurrentCapture();
         renderProfileMessage('Active tab unavailable. Try focusing the page again.');
         setCaptureButton('Save this profile', true);
@@ -172,13 +214,18 @@ document.addEventListener('DOMContentLoaded', () => {
       const profileContext = extensionApi.getProfileContext(url);
       if (profileContext.isSupported && profileContext.originPattern) {
         chrome.permissions.contains({ origins: [profileContext.originPattern] }, (hasPermission) => {
+          if (!isActiveTabRequest(requestId)) {
+            return;
+          }
+
           if (hasPermission) {
             if (profileContext.captureMode === 'overview') {
-              extractBatchData(tab.id);
+              extractBatchData(tab.id, requestId);
             } else {
-              extractData(tab.id);
+              extractData(tab.id, requestId);
             }
           } else {
+            setCaptureBusy(false);
             resetCurrentCapture();
             renderProfileMessage(
               profileContext.captureMode === 'overview'
@@ -189,16 +236,21 @@ document.addEventListener('DOMContentLoaded', () => {
               profileContext.captureMode === 'overview' ? 'Grant Access & Import Visible Profiles' : 'Grant Access & Capture',
               false,
               () => {
-              chrome.permissions.request({ origins: [profileContext.originPattern] }, (granted) => {
-                if (granted) {
-                  setCaptureButton('Save this profile', true);
-                  checkCurrentTab();
-                }
-              });
-            });
+                chrome.permissions.request({ origins: [profileContext.originPattern] }, (granted) => {
+                  if (granted) {
+                    setCaptureButton('Checking page…', true);
+                    refreshCurrentTab();
+                    return;
+                  }
+
+                  showStatus(`Permission for ${profileContext.hostname} was not granted.`, true);
+                });
+              }
+            );
           }
         });
       } else {
+        setCaptureBusy(false);
         resetCurrentCapture();
         renderProfileMessage('Navigate to a supported profile or a visible LinkedIn people overview page to capture.');
         setCaptureButton('Save this profile', true);
@@ -206,12 +258,15 @@ document.addEventListener('DOMContentLoaded', () => {
     });
   }
 
-  function extractData(tabId) {
+  function extractData(tabId, requestId) {
     resetCurrentCapture();
-    setCaptureBusy(true);
     renderProfileMessage('Reading profile data...');
     setCaptureButton('Save this profile', true);
     chrome.runtime.sendMessage({ action: 'capture_profile', tabId }, (response) => {
+      if (!isActiveTabRequest(requestId)) {
+        return;
+      }
+
       setCaptureBusy(false);
       if (chrome.runtime.lastError) {
         renderProfileMessage(`Cannot access this page: ${chrome.runtime.lastError.message}`);
@@ -231,12 +286,15 @@ document.addEventListener('DOMContentLoaded', () => {
     });
   }
 
-  function extractBatchData(tabId) {
+  function extractBatchData(tabId, requestId) {
     resetCurrentCapture();
-    setCaptureBusy(true);
     renderProfileMessage('Reading visible profiles...');
     setCaptureButton('Import visible profiles', true);
     chrome.runtime.sendMessage({ action: 'capture_profiles', tabId }, (response) => {
+      if (!isActiveTabRequest(requestId)) {
+        return;
+      }
+
       setCaptureBusy(false);
       if (chrome.runtime.lastError) {
         renderProfileMessage(`Cannot access this page: ${chrome.runtime.lastError.message}`);
@@ -431,11 +489,60 @@ document.addEventListener('DOMContentLoaded', () => {
 
   chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
     if (changeInfo.status === 'complete' && tab.active) {
-      checkCurrentTab();
+      refreshCurrentTab();
     }
   });
 
   chrome.tabs.onActivated.addListener(() => {
-    checkCurrentTab();
+    refreshCurrentTab();
+  });
+
+  chrome.storage.onChanged.addListener((changes, areaName) => {
+    if (areaName !== 'sync' || !Object.prototype.hasOwnProperty.call(changes, 'apiUrl')) {
+      return;
+    }
+
+    const nextValue = changes.apiUrl?.newValue;
+    clearStatus();
+
+    if (typeof nextValue !== 'string' || !nextValue) {
+      apiUrlInput.value = '';
+      apiUrlInput.setCustomValidity('');
+      syncApiUrlFieldState();
+      setCaptureSectionEnabled(false);
+      return;
+    }
+
+    const hubUrl = extensionApi.isAllowedHubUrl(nextValue);
+    if (!hubUrl.ok) {
+      apiUrlInput.value = nextValue;
+      apiUrlInput.setCustomValidity(hubUrl.error);
+      syncApiUrlFieldState(hubUrl.error);
+      setCaptureSectionEnabled(false);
+      return;
+    }
+
+    apiUrlInput.value = hubUrl.url;
+    apiUrlInput.setCustomValidity('');
+    syncApiUrlFieldState();
+    enableCapture();
+  });
+
+  if (chrome.permissions?.onAdded) {
+    chrome.permissions.onAdded.addListener(() => {
+      refreshCurrentTab();
+    });
+  }
+
+  if (chrome.permissions?.onRemoved) {
+    chrome.permissions.onRemoved.addListener(() => {
+      refreshCurrentTab();
+    });
+  }
+
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'visible') {
+      refreshCurrentTab();
+    }
   });
 });

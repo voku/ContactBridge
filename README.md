@@ -142,6 +142,7 @@ The Chrome extension lives in `extension/` and supports manual capture from Link
 - Load it unpacked for local beta use
 - Repository-scoped Modern Web Guidance skills live in `.claude/skills/modern-web-guidance/` and `.agents/skills/modern-web-guidance/` for future extension/UI work
 - The side panel validates `${hub}/api/extension/health` before saving a hub URL
+- The side panel automatically re-checks the active tab when focus, permissions, or saved hub configuration changes
 - Optional host permissions mean access is only granted to the sites you explicitly enable
 - Packaged production builds must explicitly include any non-local hub origins before distribution
 
